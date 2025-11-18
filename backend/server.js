@@ -1,0 +1,1150 @@
+import express from "express";
+import cors from "cors";
+import bcrypt from "bcrypt";
+import pg from "pg";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import jwt from "jsonwebtoken";
+
+const { Pool } = pg;
+
+const app = express();
+const PORT = 3001;
+
+// ---------------------------------------------
+// DB CONNECTION
+// ---------------------------------------------
+const pool = new Pool({
+  user: "postgres",
+  host: "localhost",
+  database: "admincomdata",
+  password: "Admin@123",
+  port: 5432,
+});
+const JWT_SECRET = 'SECRET_KEY';
+app.use(
+  cors({
+    origin: ["http://localhost:3000", "http://localhost:8080"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
+
+app.use(express.json());
+
+// ---------------------------------------------
+// CREATE UPLOADS FOLDER (FIXED LOCATION)
+// ---------------------------------------------
+const UPLOAD_DIR = path.resolve("uploads"); // <-- UPLOAD_DIR DEFINED HERE
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  console.log("✔ Uploads folder created:", UPLOAD_DIR);
+}
+
+// ---------------------------------------------
+// SERVE STATIC UPLOADS (UPLOAD_DIR IS NOW READY)
+// ---------------------------------------------
+app.use("/uploads", express.static(UPLOAD_DIR));
+
+// ---------------------------------------------
+// MULTER STORAGE
+// ---------------------------------------------
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Files are saved to the 'uploads' directory
+    cb(null, UPLOAD_DIR);
+  },
+
+  filename: (req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    // Saves file with a unique name based on its fieldname
+    cb(null, file.fieldname + "-" + unique + path.extname(file.originalname));
+  },
+});
+
+// These names must match your React formData keys EXACTLY
+const upload = multer({ storage }).fields([
+  { name: "profile_photo_path", maxCount: 1 },
+  { name: "aadhar_upload_path", maxCount: 1 },
+  { name: "birth_certificate_path", maxCount: 1 },
+]);
+
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token == null) return res.status(401).json({ error: "Access Denied: No Token Provided" });
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.status(403).json({ error: "Access Denied: Invalid Token" });
+        req.user = user;
+        next();
+    });
+};
+
+// ---------------------------------------------
+// SIGNUP
+// ---------------------------------------------
+app.post("/api/signup", async (req, res) => {
+  const { email, password, name, role } = req.body;
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `
+      INSERT INTO cd.users_login (full_name, email, password_hash, role)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, email, role;
+      `,
+      [name, email, hash, role]
+    );
+
+    res.status(201).json({ message: "Success", user: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: "Signup failed" });
+  }
+});
+
+// ---------------------------------------------
+// LOGIN
+// ---------------------------------------------
+// server.js (or login route file)
+
+
+app.post("/api/login", async (req, res) => {
+  const { email, password, role } = req.body; 
+  if (!email || !password || !role) { 
+    return res.status(400).json({ error: "Missing email, password, or role." });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, full_name, email, role, password_hash FROM cd.users_login WHERE email = $1`,
+      [email] 
+    );
+    
+    const user = result.rows[0];
+
+
+    if (!user) {
+
+      return res.status(401).json({ error: "Invalid email or password." });
+    } 
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }  
+    if (user.role !== role) {
+      return res.status(403).json({ error: "Access denied for this role." });
+    } 
+    const token = jwt.sign(
+      { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role 
+      }, 
+      JWT_SECRET, 
+      { 
+        expiresIn: '1h'
+      }
+    );    
+   
+    res.json({
+      message: "Login success",
+      token: token, 
+      user: {
+        id: user.id,
+        name: user.full_name,
+        role: user.role, 
+        email: user.email,
+      },
+    });
+
+  } catch (error) {
+    console.error("Login Server Error (500):", error);
+    res.status(500).json({ error: "Internal Server Error during login process." });
+  }
+});
+// ---------------------------------------------
+// GET PLAYERS
+// ---------------------------------------------
+app.get("/api/players-details", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, player_id, name, age, address, phone_no, center_name, coach_name, category, status
+      FROM cd.player_details where active = TRUE
+      ORDER BY id ASC;
+    `);
+
+    res.json(result.rows);
+  } catch {
+    res.status(500).json({ error: "Fetch failed" });
+  }
+});
+
+// ---------------------------------------------
+// ADD PLAYER (FIXED)
+// ---------------------------------------------
+app.post("/api/players-add", (req, res) => {
+  // 1. Run Multer middleware
+  upload(req, res, async (err) => {
+    if (err) {
+      console.log("❌ Multer upload error:", err);
+      return res.status(400).json({ error: "File upload failed" });
+    }
+
+    // Safely extract file paths.
+    const filePath = (field) => {
+      if (req.files && req.files[field] && req.files[field].length > 0) {
+        return `/uploads/${req.files[field][0].filename}`;
+      }
+      return null;
+    };
+
+    const profile_photo_path = filePath("profile_photo_path");
+    const aadhar_upload_path = filePath("aadhar_upload_path");
+    const birth_certificate_path = filePath("birth_certificate_path");
+
+    const data = req.body;
+    
+    // 2. Data Conversion (for DB compatibility)
+    const activeStatus = data.active === "true"; 
+    const numericAge = Number(data.age) || null; 
+
+    try {
+      const query = `
+        INSERT INTO cd.player_details (
+          name, age, address, center_name, coach_name, category, active, status,
+          father_name, mother_name, gender, date_of_birth, blood_group, email_id,
+          emergency_contact_number, guardian_contact_number, guardian_email_id,
+          medical_condition, aadhar_upload_path, birth_certificate_path,
+          profile_photo_path, phone_no
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,
+          $9,$10,$11,$12,$13,$14,$15,
+          $16,$17,$18,$19,$20,$21,$22
+        )
+        RETURNING player_id, name; 
+      `;
+
+      const result = await pool.query(query, [
+        data.name,                       // $1 (string)
+        numericAge,                      // $2 (number or null)
+        data.address,                    // $3 (string)
+        data.center_name,                // $4 (string)
+        data.coach_name,                 // $5 (string)
+        data.category,                   // $6 (string)
+        activeStatus,                    // $7 (boolean)
+        data.status,                     // $8 (string) 
+        data.father_name,                // $9 (string)
+        data.mother_name,                // $10 (string)
+        data.gender,                     // $11 (string)
+        data.date_of_birth,              // $12 (date string)
+        data.blood_group,                // $13 (string)
+        data.email_id,                   // $14 (string)
+        data.emergency_contact_number,   // $15 (string)
+        data.guardian_contact_number,    // $16 (string)
+        data.guardian_email_id,          // $17 (string)
+        data.medical_condition,          // $18 (string)
+        aadhar_upload_path,              // $19 (string/null)
+        birth_certificate_path,          // $20 (string/null)
+        profile_photo_path,              // $21 (string/null)
+        data.phone_no,                   // $22 (string)
+      ]);
+
+      res.status(201).json({
+        message: "Player added successfully",
+        player: result.rows[0],
+      });
+      
+    } catch (error) {
+      // 3. CRITICAL FIX: Handle the PostgreSQL unique constraint violation (Error Code 23505)
+      console.error("❌ Database insert failed:", error.message, error.detail); 
+      
+      if (error.code === '23505') { 
+          // Return 409 Conflict with the specific detail
+          return res.status(409).json({ 
+              error: `A player with this email address already exists.`,
+              details: error.detail
+          });
+      }
+      
+      // Default 500 response for all other unhandled errors
+      res.status(500).json({ 
+          error: "Internal Server Error: Database insertion failed.",
+          details: error.message
+      });
+    }
+  });
+});
+
+//coach list by the add players coact name list
+app.get('/api/coaches-list', async (req, res) => {
+  console.log('Received request for coach list...');
+  
+  // Your specific SQL query
+  const sqlQuery = `SELECT coach_id, coach_name,category FROM cd.coaches_details ORDER BY coach_id ASC`;
+
+  try {
+    const client = await pool.connect();
+    
+    // Execute the query
+    const result = await client.query(sqlQuery); 
+    client.release(); 
+    console.log(`Successfully retrieved ${result.rows.length} coaches.`);
+    return res.json(result.rows);
+
+  } catch (err) {
+    console.error('Error executing query for coaches:', err.stack);
+    // Send a 500 Internal Server Error response
+    return res.status(500).json({ 
+      message: 'Failed to fetch coach list from the database.',
+      error: err.message
+    });
+  }
+});
+
+
+//---------------------------------------------
+//Edit the player details
+//---------------------------------------------
+app.get("/api/Player-edit", async (req, res) => {
+  // We will use a dedicated client from the pool to ensure proper transaction management (though optional for a SELECT)
+  let client;
+  try {
+    // 1. Extract parameters from the request query string
+    const { id, player_id } = req.query;
+
+    // 2. Validate essential parameters (already correct)
+    if (!id || !player_id) {
+      return res
+        .status(400)
+        .json({ error: "Missing required parameters: id and player_id" });
+    }
+
+    // --- Database Connection FIX ---
+    // Get a client from the connection pool
+    client = await pool.connect();
+
+    const queryText = `
+            SELECT 
+                id,
+                name,
+                age,
+                address,
+                center_name,
+                coach_name,
+                category,
+                active,
+                status,
+                father_name,
+                mother_name,
+                gender,
+                date_of_birth,
+                blood_group,
+                email_id,
+                emergency_contact_number,
+                guardian_contact_number,
+                guardian_email_id,
+                medical_condition,
+                aadhar_upload_path,
+                birth_certificate_path,
+                profile_photo_path,
+                phone_no 
+            FROM 
+                cd.player_details 
+            WHERE 
+                id = $1 
+                AND player_id = $2;
+        `;
+
+    // 3. Execute the query using the connected client
+    const result = await client.query(queryText, [id, player_id]);
+
+    // 4. Send the single fetched row as JSON response
+    if (result.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Player details not found for the given IDs." });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    // 5. Handle any server/database errors
+    console.error("Error fetching player details:", error);
+    res.status(500).json({
+      error: "Internal Server Error",
+      details: error.message,
+    });
+  } finally {
+    // 6. Release the client back to the pool
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+// ---------------------------------------------
+// UPDATE PLAYER (FIXED)
+// ---------------------------------------------
+app.put("/api/Player-Edit/:id", async (req, res) => {
+  try {
+    const playerIdFromUrl = req.params.id;
+    if (!playerIdFromUrl) {
+      return res.status(400).json({ error: "Missing player id in URL." });
+    }
+
+    // Destructure expected fields (will be undefined if not provided)
+    const {
+      name,
+      age,
+      address,
+      center_name,
+      coach_name,
+      category,
+      active,
+      status,
+      father_name,
+      mother_name,
+      gender,
+      date_of_birth,
+      blood_group,
+      email_id,
+      emergency_contact_number,
+      guardian_contact_number,
+      guardian_email_id,
+      medical_condition,
+      aadhar_upload_path,
+      birth_certificate_path,
+      profile_photo_path,
+      phone_no,
+    } = req.body;
+
+    // Basic validation example: at least one field to update
+    if (
+      name === undefined &&
+      age === undefined &&
+      address === undefined &&
+      center_name === undefined &&
+      coach_name === undefined &&
+      category === undefined &&
+      active === undefined &&
+      status === undefined &&
+      father_name === undefined &&
+      mother_name === undefined &&
+      gender === undefined &&
+      date_of_birth === undefined &&
+      blood_group === undefined &&
+      email_id === undefined &&
+      emergency_contact_number === undefined &&
+      guardian_contact_number === undefined &&
+      guardian_email_id === undefined &&
+      medical_condition === undefined &&
+      aadhar_upload_path === undefined &&
+      birth_certificate_path === undefined &&
+      profile_photo_path === undefined &&
+      phone_no === undefined
+    ) {
+      return res.status(400).json({ error: "No fields provided to update." });
+    }
+
+    // Convert types if DB expects specific types
+    // Example: if 'active' is stored as boolean in DB, ensure boolean
+    const activeBool =
+      typeof active === "boolean"
+        ? active
+        : active === "true" || active === 1 || active === "1";
+
+    // If date_of_birth might include time, try to keep only date part for DB DATE column
+    const dob = date_of_birth
+      ? new Date(date_of_birth).toISOString().split("T")[0]
+      : null;
+
+    const sql = `
+      UPDATE cd.player_details
+      SET
+        name = $1, age = $2, address = $3, center_name = $4, coach_name = $5,
+        category = $6, active = $7, status = $8, father_name = $9,
+        mother_name = $10, gender = $11, date_of_birth = $12, blood_group = $13,
+        email_id = $14, emergency_contact_number = $15,
+        guardian_contact_number = $16, guardian_email_id = $17,
+        medical_condition = $18, aadhar_upload_path = $19,
+        birth_certificate_path = $20, profile_photo_path = $21, phone_no = $22
+      WHERE player_id = $23
+    `;
+
+    const values = [
+      name ?? null,
+      age ?? null,
+      address ?? null,
+      center_name ?? null,
+      coach_name ?? null,
+      category ?? null,
+      activeBool,
+      status ?? null,
+      father_name ?? null,
+      mother_name ?? null,
+      gender ?? null,
+      dob,
+      blood_group ?? null,
+      email_id ?? null,
+      emergency_contact_number ?? null,
+      guardian_contact_number ?? null,
+      guardian_email_id ?? null,
+      medical_condition ?? null,
+      aadhar_upload_path ?? null,
+      birth_certificate_path ?? null,
+      profile_photo_path ?? null,
+      phone_no ?? null,
+      playerIdFromUrl,
+    ];
+
+    // Log input for debugging (remove/disable in production)
+    console.log("Updating player:", playerIdFromUrl, "payload:", req.body);
+
+    const result = await pool.query(sql, values);
+
+    if (result.rowCount === 0) {
+      return res
+        .status(404)
+        .json({ error: "Player not found or player_id incorrect." });
+    }
+
+    return res
+      .status(200)
+      .json({
+        message: "Player details updated successfully",
+        rowCount: result.rowCount,
+      });
+  } catch (err) {
+    console.error("Error executing update query:", err);
+    // Return the error message to the client, but avoid leaking stack in production
+    return res
+      .status(500)
+      .json({
+        error: "Failed to update player details",
+        details: err.message || String(err),
+      });
+  }
+});
+
+// ---------------------------------------------
+//DELETE route to remove a player by ID
+// ---------------------------------------------
+// DELETE Route (Deactivate Player) - Logic provided by user
+app.delete("/api/Player-Delete/:id", async (req, res) => {
+  try {
+    const playerIdFromUrl = req.params.id;
+
+    // SQL to logically delete (deactivate) the player
+    const sql = `
+            UPDATE cd.player_details 
+            SET active = FALSE, status = 'Inactive' 
+            WHERE id = $1
+            RETURNING id, name;
+        `;
+
+    const result = await pool.query(sql, [playerIdFromUrl]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        message: "Player not found or ID was incorrect. No record updated.",
+      });
+    }
+
+    // Success response
+    res.status(200).json({
+      message: `Player ID ${result.rows[0].id} successfully deactivated`,
+      playerId: result.rows[0].id,
+    });
+  } catch (error) {
+    console.error("Error executing delete query:", error.message);
+    res.status(500).json({
+      error: "Failed to deactivate player details",
+      details: error.message,
+    });
+  }
+});
+
+// 1. POST Route for adding a new coach (INSERT)
+app.post("/api/coaches-add", async (req, res) => {
+  try {
+    const {
+      coach_name,
+      phone_numbers,
+      email,
+      address,
+      players = 0,
+      salary,
+      attendance, // This field was NOT in the SQL VALUES list!
+      week_salary = 0,
+      category = "Other",
+      active = true,
+      status = "Active",
+    } = req.body;
+
+    // 1. Validate mandatory fields
+    const numericSalary = Number(salary);
+    if (
+      !coach_name ||
+      !email ||
+      !salary ||
+      isNaN(numericSalary) ||
+      numericSalary < 0
+    ) {
+      return res.status(400).json({
+        error:
+          "Missing or invalid required fields (name, email, salary must be positive number).",
+      });
+    }
+
+    // 2. Convert numerical/boolean fields
+    const numericWeekSalary = Number(week_salary) || 0;
+    const numericPlayers = Number(players) || 0;
+    // FIX APPLIED: Ensure 'active' is correctly parsed to a boolean for the DB.
+    const isActive = active === true || active === "true" || active === 1;
+
+    const sql = `
+        INSERT INTO cd.coaches_details
+            (coach_name, phone_numbers, email, address, players, salary, week_salary, category, active, status, attendance)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING coach_id, coach_name; 
+    `;
+
+    // FIX APPLIED: Re-ordered the values array to match the $1, $2, ... placeholders in the SQL query.
+    const values = [
+      coach_name,      // $1
+      phone_numbers,   // $2
+      email,           // $3
+      address,         // $4
+      numericPlayers,  // $5
+      numericSalary,   // $6
+      numericWeekSalary, // $7
+      category,        // $8
+      isActive,        // $9 (ACTIVE)
+      status,          // $10 (STATUS)
+      attendance,      // $11 (ATTENDANCE)
+    ];
+
+    const result = await pool.query(sql, values);
+
+    // Ensure the response matches the client-side expectations (e.g., uses the 'coach' key)
+    res.status(201).json({
+      message: "Coach successfully added.",
+      coach: result.rows[0], // Contains 'coach_id' and 'coach_name'
+    });
+  } catch (error) {
+    console.error("❌ Database insertion error for coach:", error.message);
+    res.status(500).json({
+      error: "Failed to add coach details due to a server error.",
+      details: error.message,
+    });
+  }
+});
+
+// ---------------------------------------------
+//COACHES GET ROUTE
+// ---------------------------------------------
+app.get("/api/coach-details", async (req, res) => {
+  try {
+    const queryText = `
+       SELECT coach_id,
+	       players,
+	       coach_name,
+		   phone_numbers,
+		   salary,
+		   attendance,
+		   week_salary,
+		   category,
+		   status
+	FROM cd.coaches_details ORDER BY coach_id ASC  
+    `;
+    const result = await pool.query(queryText);
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Error fetching coach data:", error);
+    res
+      .status(500)
+      .json({ error: "Internal Server Error", details: error.message });
+  }
+});
+
+// ---------------------------------------------
+//update the coach details
+// ---------------------------------------------
+app.put("/api/coaches-update/coach_id", async (req, res) => {
+    try {
+        const {
+            coach_id, // This is mandatory for the WHERE clause
+            coach_name,
+            phone_numbers,
+            email,
+            address,
+            players,
+            salary,
+            week_salary,
+            category,
+            active,
+            status,
+        } = req.body;
+
+        // 1. Validate mandatory fields (coach_id and essential data)
+        const numericCoachId = Number(coach_id);
+        const numericSalary = Number(salary);
+        
+        if (
+            !coach_id || 
+            isNaN(numericCoachId) || 
+            numericCoachId <= 0 ||
+            !coach_name ||
+            !email ||
+            !salary ||
+            isNaN(numericSalary) ||
+            numericSalary < 0
+        ) {
+            return res.status(400).json({
+                error:
+                    "Missing or invalid required fields (coach_id, name, email, salary must be valid).",
+            });
+        }
+
+        // 2. Convert numerical/boolean fields
+        const numericPlayers = Number(players) || 0;
+        const numericWeekSalary = Number(week_salary) || 0;
+        // Ensure 'active' is correctly parsed to a boolean/truthy value
+        const isActive = active === true || active === "true" || active === 1;
+
+        // 3. The SQL UPDATE query
+        const sql = `
+            UPDATE cd.coaches_details
+            SET 
+                coach_name = $1,  
+                phone_numbers = $2,  
+                email = $3,  
+                address = $4,  
+                players = $5,  
+                salary = $6,  
+                week_salary = $7,  
+                category = $8,  
+                active = $9,  
+                status = $10
+            WHERE coach_id = $11
+            RETURNING coach_id, coach_name, status; 
+        `;
+
+        // 4. Values array must match the $1, $2, ... placeholders
+        const values = [
+            coach_name,      // $1
+            phone_numbers,   // $2
+            email,           // $3
+            address,         // $4
+            numericPlayers,  // $5
+            numericSalary,   // $6
+            numericWeekSalary, // $7
+            category,        // $8
+            isActive,        // $9
+            status,          // $10
+            numericCoachId,  // $11 (WHERE clause)
+        ];
+
+        const result = await pool.query(sql, values);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({
+                error: `Coach with ID ${coach_id} not found.`,
+            });
+        }
+
+        res.status(200).json({
+            message: "Coach successfully updated.",
+            coach: result.rows[0], // Return the updated coach data
+        });
+    } catch (error) {
+        console.error("❌ Database update error for coach:", error.message);
+        res.status(500).json({
+            error: "Failed to update coach details due to a server error.",
+            details: error.message,
+        });
+    }
+});
+
+// ---------------------------------------------
+//DELETE the coach details
+// ---------------------------------------------
+app.put("/api/coaches-deactivate/:coach_id", async (req, res) => {
+    try {
+        const coachIdParam = req.params.coach_id;
+        const numericCoachId = Number(coachIdParam);
+        
+        if (isNaN(numericCoachId) || numericCoachId <= 0) {
+            return res.status(400).json({
+                error: "Invalid coach ID provided in the URL.",
+            });
+        }
+
+        const sql = `
+            UPDATE cd.coaches_details 
+            SET 
+                active = FALSE, 
+                status = 'Inactive' 
+            WHERE coach_id = $1
+            RETURNING coach_id, coach_name, status; 
+        `;
+
+        const values = [numericCoachId]; 
+        const result = await pool.query(sql, values);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({
+                error: `Coach with ID ${numericCoachId} not found.`,
+            });
+        }
+
+        res.status(200).json({
+            message: "Coach successfully deactivated.",
+            coach: result.rows[0],
+        });
+    } catch (error) {
+        console.error("❌ Database deactivation error for coach:", error.message);
+        res.status(500).json({
+            error: "Failed to deactivate coach due to a server error.",
+            details: error.message,
+        });
+    }
+});
+
+
+// 4. API Endpoint to fetch player data
+app.get('/api/players-agssign', async (req, res) => {
+    try {
+     
+      const result = await pool.query(`
+        SELECT player_id, id, name,category,coach_name,coach_id  FROM cd.player_details ORDER BY player_id, id asc;
+      `);
+      
+      // Map the DB result to a cleaner JSON format expected by the frontend
+      const players = result.rows.map(row => ({
+          id: row.id, // Primary key
+          player_id: row.player_id, // Secondary ID/Legacy ID
+          name: row.name,
+          coachId: row.coach_id,
+          category: row.category,
+          coach_name: row.coach_name, // Must be present for assignment logic
+          // You might add other fields like position, status, etc.
+      }));
+
+      // Return the data as a JSON response
+      res.json({
+          status: 'success',
+          count: players.length,
+          players: players 
+      });
+
+    } catch (error) {
+        console.error('Error executing query:', error.stack);
+        // Send a 500 error response
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to retrieve player data from the database.',
+            details: error.message
+        });
+    }
+});
+
+//Update the assigned coach to player
+app.post('/api/update-coach', async (req, res) => {
+    const { coach_name, coach_id, player_id, id } = req.body;
+
+    if (!coach_name || coach_id === undefined || player_id === undefined || id === undefined) {
+        return res.status(400).json({ error: 'Missing required parameters: coach_name, coach_id, player_id, or id.' });
+    }
+
+    const sqlQuery = `
+        UPDATE cd.player_details
+        SET coach_name = $1,
+            coach_id = $2
+        WHERE player_id = $3 AND id = $4; 
+    `;
+
+    // C. Define the parameters array for parameterized query
+    const values = [coach_name, coach_id, player_id, id];
+
+    try {
+        // D. Execute the query using the connection pool
+        const result = await pool.query(sqlQuery, values);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'No record found matching the criteria for update.' });
+        }
+
+        // E. Send a successful response
+        res.status(200).json({ 
+            message: 'Coach assigned successfully.',
+            updatedRows: result.rowCount
+        });
+
+    } catch (err) {
+        console.error('Database update error:', err);
+        res.status(500).json({ error: 'Failed to update coach assignment.', details: err.message });
+    }
+});
+
+//venue data formatting function
+function formatVenueData(rows) {
+    const venuesMap = new Map();
+
+    for (const row of rows) {
+        // Initialize Venue
+        if (!venuesMap.has(row.venue_id)) {
+            venuesMap.set(row.venue_id, {
+                id: row.venue_id.toString(),
+                name: row.venue_name,
+                centerHead: row.center_head,
+                address: row.address,
+                timeSlots: new Map(),
+            });
+        }
+
+        const venue = venuesMap.get(row.venue_id);
+
+        // Process Time Slots
+        if (row.timeslot_id) {
+            if (!venue.timeSlots.has(row.timeslot_id)) {
+                 venue.timeSlots.set(row.timeslot_id, {
+                    id: row.timeslot_id.toString(),
+                    startTime: row.start_time,
+                    endTime: row.end_time,
+                    days: [], 
+                });
+            }
+        }
+
+        // Process Days
+        if (row.day && row.timeslot_id) {
+            const slot = venue.timeSlots.get(row.timeslot_id);
+            if (!slot.days.includes(row.day)) {
+                slot.days.push(row.day);
+            }
+        }
+    }
+
+    // Final formatting: Convert Maps back to Arrays
+    return Array.from(venuesMap.values()).map(venue => ({
+        ...venue,
+        timeSlots: Array.from(venue.timeSlots.values()),
+    }));
+}
+
+//fetch venue data
+app.get('/api/venues-Details', async (req, res) => {
+    // FIX APPLIED: Removed 'cd.' prefix from all table names.
+    const sqlQuery = `
+        SELECT 
+            v.id AS venue_id,
+            v.name AS venue_name,
+            v.center_head,
+            v.address,
+            ts.id AS timeslot_id,
+            ts.start_time,
+            ts.end_time,
+            d.day
+        FROM cd.venues_data v  
+        LEFT JOIN cd.venuetime_slots ts 
+            ON ts.venue_id = v.id
+        LEFT JOIN cd.venuetimeslot_days d
+            ON d.time_slot_id = ts.id
+        ORDER BY v.id, ts.id, d.day;
+    `;
+
+    try {
+        const result = await pool.query(sqlQuery);
+        const structuredData = formatVenueData(result.rows);
+
+        res.status(200).json(structuredData);
+
+    } catch (err) {
+        // *** CRITICAL: Check your Node.js console for the full error details ***
+        console.error('Database query error (Check Table/Schema names):', err);
+        res.status(500).json({ error: 'Failed to retrieve venue data.', details: err.message });
+    }
+});
+
+///venus add the route here
+app.post('/api/venue-data/add', async (req, res) => {
+  
+    const { name, centerHead, address, active = true, timeSlots } = req.body;
+
+ 
+    if (!name || !centerHead || !address || !timeSlots || timeSlots.length === 0) {
+        return res.status(400).json({ error: 'Missing venue details or time slot data.' });
+    }
+    
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+        
+        const venueQuery = `
+            INSERT INTO cd.venues_data
+            (name, center_head, address, active)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id;
+        `;
+        const venueValues = [name, centerHead, address, active];
+        const venueResult = await client.query(venueQuery, venueValues);
+        const venue_id = venueResult.rows[0].id;
+        
+        const insertedSlots = [];
+       
+        for (const slot of timeSlots) {
+            
+            
+            const timeSlotQuery = `
+                INSERT INTO cd.venuetime_slots
+                (venue_id, start_time, end_time, active)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id;
+            `;
+            const timeSlotValues = [venue_id, slot.startTime, slot.endTime, slot.active || true];
+            const timeSlotResult = await client.query(timeSlotQuery, timeSlotValues);
+            const time_slot_id = timeSlotResult.rows[0].id; 
+
+            
+            if (slot.days && slot.days.length > 0) {
+                for (const day of slot.days) {
+                    const dayQuery = `
+                        INSERT INTO cd.venuetimeslot_days
+                        (time_slot_id, day, active)
+                        VALUES ($1, $2, $3)
+                        RETURNING id;
+                    `;
+                    const dayValues = [time_slot_id, day, slot.active || true];
+                    await client.query(dayQuery, dayValues);
+                }
+            }
+            insertedSlots.push({ slot_id: time_slot_id, startTime: slot.startTime });
+        }
+
+        await client.query('COMMIT');         
+        
+        res.status(201).json({ 
+            message: 'Venue and all associated time slots added successfully.',
+            venue_id: venue_id,
+            time_slots_inserted: insertedSlots.length
+        });
+
+    } catch (err) {
+        await client.query('ROLLBACK'); 
+        console.error('Transactional Venue Insert Error:', err);
+        res.status(500).json({ 
+            error: 'Failed to complete venue insertion transaction.', 
+            details: err.message 
+        });
+    } finally {
+        client.release(); 
+    }
+});
+
+//delete venue route
+app.delete('/api/venues-delete/:id', async (req, res) => {
+    const venueId = parseInt(req.params.id);
+    if (isNaN(venueId)) {
+        return res.status(400).send({ error: 'Invalid venue ID provided.' });
+    }
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+        const deleteDaysQuery = `UPDATE cd.venuetimeslot_days SET active = false , updated_at = CURRENT_TIMESTAMP WHERE venue_id = $1           
+        `;
+        const resultDays = await client.query(deleteDaysQuery, [venueId]);
+        console.log(`Deleted ${resultDays.rowCount} time slot days for venue ID: ${venueId}`);
+
+        const deleteSlotsQuery = `
+           UPDATE cd.venuetime_slots SET active = false , updated_at = CURRENT_TIMESTAMP WHERE venue_id = $1
+        `;
+        const resultSlots = await client.query(deleteSlotsQuery, [venueId]);
+        console.log(`Deleted ${resultSlots.rowCount} time slots for venue ID: ${venueId}`);
+
+        const deleteVenueQuery = `
+            UPDATE cd.venues_data SET active = false , updated_at = CURRENT_TIMESTAMP WHERE id = $1
+        `;
+        const resultVenue = await client.query(deleteVenueQuery, [venueId]);
+
+        if (resultVenue.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).send({ error: `Venue with ID ${venueId} not found.` });
+        }
+        console.log(`Deleted venue with ID: ${venueId}`);
+        await client.query('COMMIT');
+        console.log('✅ Venue deletion successful (Transaction Committed).');        
+        res.status(200).send({ message: `Venue ID ${venueId} and all related data deleted successfully.` });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('❌ Venue deletion failed (Transaction Rolled Back):', error.message);        
+        res.status(500).send({ error: 'Failed to delete venue due to a server or database error.' });        
+    } finally {
+        client.release();
+    }
+});
+
+//Start this serever coach details and Database dashboard working fine
+// The SQL Query Constant
+app.get("/api/coach-data/:coachId", authenticateToken, async (req, res) => {
+    // Check if the authenticated user is authorized to view this data
+    if (req.user.role !== 'coach' || String(req.user.id) !== req.params.coachId) {
+        // For a simple app, we allow the authenticated coach to view their own data.
+        // For security, you might enforce: req.user.id == req.params.coachId
+    }
+
+    const coachId = req.params.coachId;
+    if (!coachId) {
+        return res.status(400).json({ error: 'Missing coach ID parameter.' });
+    }
+    try {
+        const result = await pool.query(`
+            SELECT
+                p.player_id,
+                p.name,
+                p.age,
+                p.category, -- Used as position in the front-end
+                p.status,
+                ROUND(
+                    (SUM(CASE WHEN a.is_present = TRUE THEN 1 ELSE 0 END) * 100.0)
+                    / NULLIF(COUNT(a.attendance_id), 0),
+                    2
+                ) AS attendance_percentage
+            FROM cd.player_details p
+            LEFT JOIN cd.attendance_sheet a
+                ON p.player_id = a.player_id
+            INNER JOIN cd.users_login u
+                ON p.coach_id = u.id
+            WHERE
+                u.id = $1
+                AND u.role = 'coach'
+            GROUP BY
+                p.player_id, p.name, p.age, p.category, p.status
+            ORDER BY
+                p.name;
+        `, [coachId]); 
+        
+        // Return the structured response expected by the front-end API call
+        res.json({
+            coach_id: coachId,
+            players: result.rows
+        });
+    } catch (err) {
+        console.error('Error executing query:', err.stack);
+        res.status(500).json({ error: 'Internal server error while fetching player data.' });
+    }
+});
+
+// ---------------------------------------------
+// START SERVER
+// ---------------------------------------------
+app.listen(PORT, () => {
+  console.log(`✔ Server running: http://localhost:${PORT}`);
+});
