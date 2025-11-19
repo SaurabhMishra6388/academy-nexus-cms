@@ -510,3 +510,94 @@ export const fetchCoachAssignedPlayers = async (coachId, token) => {
     return []; 
   }
 };
+
+/// ---------------------------------------------
+//attandance update by coach
+export const recordAttendance = async (attendanceData) => {
+  const endpoint = `${API_URL}/api/attendance`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(attendanceData),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || `HTTP error! Status: ${response.status}`;
+      throw new Error(errorMessage);
+    }
+    return response.json();
+
+  } catch (error) {
+    console.error('API call failed for attendance recording:', error.message);
+    throw error;
+  }
+};
+
+// ---------------------------------------------
+// Fetch the parent's players by guardian email
+export const getPlayerDetailsByGuardianEmail = async (email, token) => {
+    // 1. Input Validation
+    if (!email || !token) {
+        throw new Error("Missing authentication credentials (email or token).");
+    }
+
+    try {
+        // 2. API Call with Bearer Token
+        const response = await fetch(`${API_URL}/api/player-details/${email}`, { 
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+                // CORRECTLY USES THE TOKEN in the Authorization header
+                "Authorization": `Bearer ${token}`, 
+            },
+        });
+
+        // 3. Handle HTTP Errors (4xx, 5xx)
+        if (!response.ok) {
+            let errorData = {};
+            // Attempt to parse the error message from the response body
+            try { 
+                errorData = await response.json(); 
+            } catch (e) {
+                 // Ignore JSON parsing error if response body is empty (e.g., 403 Forbidden without body)
+            }
+            // Throw a descriptive error including the status and server's message
+            throw new Error(
+                `API Error ${response.status}: ${errorData.error || errorData.message || 'Failed to fetch players.'}`
+            );
+        }
+
+        // 4. Parse Successful Response
+        const playersArray = await response.json();
+
+        // 5. Safety Checks and Data Mapping
+        if (!Array.isArray(playersArray)) {
+             console.warn("API response is not an array. Returning empty list.", playersArray);
+             return [];
+        }
+
+        // Map and transform the data structure for consistent use on the frontend
+        return playersArray.map(childData => ({
+            player_id: childData.player_id,
+            name: childData.name,
+            age: childData.age,
+            center: childData.center,
+            coach: childData.coach,
+            position: childData.position, // Mapped from category/position in DB
+            phone_no: childData.phone_no,
+            player_email: childData.player_email,
+            // Ensure attendance_percentage is a number, defaulting to 0
+            attendance_percentage: Number(childData.attendance_percentage) || 0,
+            recent_activities_json: childData.recent_activities_json 
+        }));
+
+    } catch (err) {
+        // Re-throw the error to be caught by the calling function (e.g., loadData in ParentDashboard.jsx)
+        console.error("Error fetching player details:", err.message);
+        throw err;
+    }
+};

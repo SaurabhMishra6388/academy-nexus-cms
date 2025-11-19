@@ -13,10 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/components/ui/use-toast"; // Used for toast.success/error
 import { useAuth } from "@/contexts/AuthContext";
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Label } from '@/components/ui/label';
+// Removed unused RadioGroup imports
 import {
   Users,
   Calendar as CalendarIcon,
@@ -24,11 +23,10 @@ import {
   LogOut,
   CheckCircle,
   UserCheck,
-  Trophy,
   Target,
-  BookOpen,
 } from "lucide-react";
-import { fetchCoachAssignedPlayers } from "../../../api"; // Adjusted path to root api file
+// Assuming you have both functions exported from this path
+import { fetchCoachAssignedPlayers, recordAttendance } from "../../../api";
 
 const CoachDashboard = () => {
   // 🔑 HOOKS MUST BE CALLED UNCONDITIONALLY AT THE TOP
@@ -36,26 +34,93 @@ const CoachDashboard = () => {
   const { user, session, isLoading: isAuthLoading, logout } = useAuth();
   const [assignedPlayers, setAssignedPlayers] = useState([]);
   const [isLoadingPlayers, setIsLoadingPlayers] = useState(false);
-  
-  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { toast } = useToast(); // Destructure toast
   const [localAttendance, setLocalAttendance] = useState({});
-  // FIX: Initialize useNavigate
   const navigate = useNavigate();
 
-  // Extract token safely
   const token = session?.accessToken;
 
+  // --- HANDLERS ---
   const handleAttendanceChange = (playerId, status) => {
-    setLocalAttendance(prev => ({
+    setLocalAttendance((prev) => ({
       ...prev,
       [playerId]: status,
     }));
   };
 
+  const handleSubmitAttendance = async () => {
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+
+    const dateString = selectedDate.toISOString().split("T")[0];
+    const coachId = user.id;
+
+    try {
+      const submissionPromises = assignedPlayers.map((player) => {
+        // Determine status: 'present' maps to true, anything else maps to false
+        const isPresent =
+          localAttendance[player.id] === "present" ||
+          (localAttendance[player.id] === undefined && true); // Default to present if not touched
+
+        const payload = {
+          playerId: player.id,
+          attendanceDate: dateString,
+          isPresent: isPresent,
+          coachId: coachId,
+        };
+
+        // Call the API for each player concurrently
+        return recordAttendance(payload);
+      });
+
+      const results = await Promise.all(submissionPromises);
+      console.log("Batch submission complete:", results);
+
+      // 🥇 Success Feedback using toast
+      toast({
+        title: "Attendance Submitted",
+        description: `Attendance recorded for ${results.length} players on ${dateString}.`,
+        variant: "success", // Assuming you have a 'success' variant defined
+      });
+
+      // Optionally reset local attendance state after success
+      // setLocalAttendance({});
+    } catch (error) {
+      console.error("Attendance Submission Failed:", error);
+      // ❌ Error Feedback using toast
+      toast({
+        title: "Submission Failed",
+        description: `Failed to submit attendance. Error: ${error.message.substring(
+          0,
+          80
+        )}...`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    // 1. Log out the user (clears session/token)
+    logout();
+    // 2. Show success notification
+    toast({
+      title: "Signed Out",
+      description:
+        "You have been securely logged out and redirected to the login page.",
+      variant: "success",
+    });
+    // 3. Navigate to the /auth route
+    navigate("/auth");
+  };
+
+  // --- MEMOIZED VALUES ---
   const averageAttendance = useMemo(() => {
     if (!assignedPlayers || assignedPlayers.length === 0) return 0;
     const total = assignedPlayers.reduce((sum, p) => {
-      // Guard attendance field, ensuring it's a number
       const att =
         typeof p.attendance === "number"
           ? p.attendance
@@ -65,15 +130,14 @@ const CoachDashboard = () => {
     return Math.round(total / assignedPlayers.length);
   }, [assignedPlayers]);
 
+  // --- EFFECTS ---
   useEffect(() => {
-    // Conditional logic starts inside useEffect
     if (isAuthLoading) {
       setAssignedPlayers([]);
       setIsLoadingPlayers(false);
       return;
     }
 
-    // Check for user and token
     if (!user || !user.id || !token) {
       setAssignedPlayers([]);
       setIsLoadingPlayers(false);
@@ -85,7 +149,6 @@ const CoachDashboard = () => {
     const fetchPlayers = async () => {
       setIsLoadingPlayers(true);
       try {
-        // Use the fetchCoachAssignedPlayers function with user.id and token
         const players = await fetchCoachAssignedPlayers(user.id, token);
         if (!isMounted) return;
         setAssignedPlayers(players || []);
@@ -105,7 +168,7 @@ const CoachDashboard = () => {
   }, [isAuthLoading, user, token]);
   // ----------------------------------------
 
-  // Static UI data (kept for dashboard structure)
+  // --- STATIC UI DATA ---
   const todaysSchedule = [
     {
       time: "4:00 PM - 5:30 PM",
@@ -136,13 +199,9 @@ const CoachDashboard = () => {
     { day: "Saturday", sessions: ["10:00 AM - Match Day"] },
     { day: "Sunday", sessions: ["Rest Day"] },
   ];
+  // ----------------------------------------
 
-  const markAttendance = (playerId) => {
-    console.log(`Marking attendance for player ${playerId}`);
-    // TODO: implement attendance API call
-  };
-
-  // Conditional return must be AFTER all hook calls
+  // --- CONDITIONAL RENDERING ---
   if (isAuthLoading) {
     return (
       <div className="p-10 text-center">
@@ -151,38 +210,13 @@ const CoachDashboard = () => {
     );
   }
 
-  // If not logged in after loading, return null (AppRouter handles redirect)
   if (!user) {
     return null;
   }
 
-  const handleSignOut = () => {
-    // 1. Log out the user (clears session/token)
-    logout();
-    // 2. Show success notification
-    toast({
-      title: "Signed Out",
-      description:
-        "You have been securely logged out and redirected to the login page.",
-      variant: "success",
-    });
-    // 3. FIX: Navigate to the /auth route
-    navigate("/auth");
-  };
-
-  const handleSubmitAttendance = () => {
-    console.log("Submitting Attendance:", localAttendance);
-    // Loop through localAttendance and call the actual markAttendance function/API
-    Object.entries(localAttendance).forEach(([id, status]) => {
-      markAttendance(parseInt(id), status);
-    });
-    alert("Attendance Submitted! Check console for details.");
-    // Optionally clear localAttendance state here
-    // setLocalAttendance({});
-  };
-
+  // --- MAIN RENDER ---
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4">
+    <div className="space-y-5">
       {/* Header */}
       <div className="bg-gradient-primary rounded-xl p-6 text-primary-foreground flex justify-between items-start">
         <div className="flex-grow">
@@ -198,14 +232,14 @@ const CoachDashboard = () => {
           <div className="mt-2 text-sm text-primary-foreground/70 space-y-1">
             <p>Email: {user?.email || "—"}</p>
             <p>Role: {user?.role || "—"}</p>
-            <p>Coach ID: {user?.id || "—"}</p>
+            {/* <p>Coach ID: {user?.id || "—"}</p> */}
           </div>
         </div>
 
         {/* Sign Out Button */}
         <Button
           variant="secondary"
-          className="ml-8 bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground"
+          className="ml-7 bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground"
           onClick={handleSignOut}
         >
           <LogOut className="h-4 w-4 mr-2" />
@@ -305,47 +339,54 @@ const CoachDashboard = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {assignedPlayers.map((player) => (
-                    <div
-                      key={player.id}
-                      className="flex items-center justify-between p-4 bg-muted rounded-lg"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-primary-foreground font-bold">
-                          {player.name ? player.name.charAt(0) : "?"}
+                  {assignedPlayers.map((player) => {
+                    return (
+                      <div
+                        key={player.id}
+                        className="flex items-center justify-between p-4 bg-muted rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-primary-foreground font-bold">
+                            {player.name ? player.name.charAt(0) : "?"}
+                          </div>
+                          <div>
+                            <p className="font-medium">
+                              {player.name || "Unnamed Player"}
+                            </p>
+                            <p className="text-xs text-muted-foreground mb-1">
+                              ID: {player.id || "—"}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Age {player.age ?? "—"} • {player.position ?? "—"}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium">
-                            {player.name || "Unnamed Player"}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Age {player.age ?? "—"} • {player.position ?? "—"}
-                          </p>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <p className="text-sm font-medium">
+                              {typeof player.attendance === "number"
+                                ? `${player.attendance}%`
+                                : player.attendance
+                                ? `${player.attendance}%`
+                                : "—"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Attendance
+                            </p>
+                          </div>
+                          <Badge
+                            variant={
+                              player.status === "Active"
+                                ? "default"
+                                : "secondary"
+                            }
+                          >
+                            {player.status || "Unknown"}
+                          </Badge>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <p className="text-sm font-medium">
-                            {typeof player.attendance === "number"
-                              ? `${player.attendance}%`
-                              : player.attendance
-                              ? `${player.attendance}%`
-                              : "—"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Attendance
-                          </p>
-                        </div>
-                        <Badge
-                          variant={
-                            player.status === "Active" ? "default" : "secondary"
-                          }
-                        >
-                          {player.status || "Unknown"}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -420,7 +461,7 @@ const CoachDashboard = () => {
 
         <TabsContent value="attendance" className="space-y-4">
           <div className="grid md:grid-cols-2 gap-6">
-            {/* --- Mark Attendance Card --- */}
+            {/* ⚽ Mark Attendance Card */}
             <Card className="shadow-card">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -432,10 +473,11 @@ const CoachDashboard = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {assignedPlayers.slice(0, 4).map((player) => {
-                    const currentStatus =
-                      localAttendance[player.id] || "present"; // Default to present
+                <div className="space-y-3 max-h-[400px] overflow-y-scroll pr-2">
+                  {assignedPlayers.map((player) => {
+                    const isPresent =
+                      (localAttendance[player.id] || "present") === "present";
+
                     return (
                       <div
                         key={player.id}
@@ -452,57 +494,56 @@ const CoachDashboard = () => {
                           </span>
                         </div>
 
-                        {/* Radio Button Group for Attendance */}
-                        <RadioGroup
-                          defaultValue={currentStatus}
-                          onValueChange={(status) =>
-                            handleAttendanceChange(player.id, status)
-                          }
-                          className="flex space-x-4"
-                        >
-                          <div className="flex items-center space-x-2">
-                            <RadioGroupItem
-                              value="present"
-                              id={`p-${player.id}`}
-                              className="text-success border-success"
+                        {/* --- Toggle Switch for Attendance --- */}
+                        <div className="flex items-center space-x-3">
+                          {/* Display Current Status Text - FIX: Uncommented the display text */}
+                          <span
+                            className={`font-medium min-w-[55px] text-right ${
+                              isPresent ? "text-success" : "text-destructive"
+                            }`}
+                          >
+                            {/* {isPresent ? "Present" : "Absent"} */}
+                          </span>
+
+                          {/* Toggle Switch Control */}
+                          <label
+                            htmlFor={`attendance-switch-${player.id}`}
+                            className="relative inline-flex items-center cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              id={`attendance-switch-${player.id}`}
+                              className="sr-only peer"
+                              checked={isPresent}
+                              onChange={(e) => {
+                                const newStatus = e.target.checked
+                                  ? "present"
+                                  : "absent";
+                                handleAttendanceChange(player.id, newStatus);
+                              }}
                             />
-                            <Label
-                              htmlFor={`p-${player.id}`}
-                              className="text-success font-medium"
-                            >
-                              Present
-                            </Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <RadioGroupItem
-                              value="absent"
-                              id={`a-${player.id}`}
-                              className="text-destructive border-destructive"
-                            />
-                            <Label
-                              htmlFor={`a-${player.id}`}
-                              className="text-destructive font-medium"
-                            >
-                              Absent
-                            </Label>
-                          </div>
-                        </RadioGroup>
-                        {/* End Radio Button Group */}
+                            {/* Visual representation of the toggle switch (Tailwind CSS styling) */}
+                            <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                          </label>
+                        </div>
+                        {/* --- End: Toggle Switch --- */}
                       </div>
                     );
                   })}
                 </div>
+
                 <Button
                   className="w-full mt-4"
                   onClick={handleSubmitAttendance}
+                  disabled={isSubmitting} // Added disabled state for submission
                 >
-                  Submit Attendance
+                  {isSubmitting ? "Submitting..." : "Submit Attendance"}
                 </Button>
               </CardContent>
             </Card>
             {/* --- End Mark Attendance Card --- */}
 
-            {/* --- Calendar Card --- */}
+            {/* 📅 Calendar Card (Marking Removed) */}
             <Card className="shadow-card">
               <CardHeader>
                 <CardTitle>Calendar</CardTitle>
@@ -516,7 +557,11 @@ const CoachDashboard = () => {
                   selected={selectedDate}
                   onSelect={setSelectedDate}
                   className="rounded-md border"
+
+                  // Removed custom modifiers/classNames for scheduling marks
                 />
+
+                {/* Schedule Legend is also removed as the marking is gone */}
               </CardContent>
             </Card>
             {/* --- End Calendar Card --- */}
