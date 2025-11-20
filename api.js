@@ -280,13 +280,15 @@ export const GetCoachDetails = async () => {
 
 //coach update notes
 export const UpdateCoachdata = async (apiData) => {
-  // Map the client's 'id' field back to the server's expected 'coach_id' in the payload
+  const idValue = apiData.coach_id || apiData.id;
+
   const payload = {
     ...apiData,
-    coach_id: apiData.id, 
+    coach_id: idValue, // Ensure the server-expected field is populated
   };
-  
-  // NOTE: Using the exact endpoint from your Express route.
+
+  // Ensure this field deletion logic is correct based on your API's expected payload
+  delete payload.name; 
   const endpoint = `${API_URL}/api/coaches-update/coach_id`; 
 
   try {
@@ -299,8 +301,8 @@ export const UpdateCoachdata = async (apiData) => {
     });
 
     if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+      const errorData = await response.json();
+      throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
     }
 
     const data = await response.json();

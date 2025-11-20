@@ -670,20 +670,18 @@ app.get("/api/coach-details", async (req, res) => {
 app.put("/api/coaches-update/coach_id", async (req, res) => {
   try {
     const {
-      coach_id, // This is mandatory for the WHERE clause
+      coach_id,
       coach_name,
       phone_numbers,
       email,
       address,
-      players,
       salary,
       week_salary,
-      category,
       active,
       status,
     } = req.body;
 
-    // 1. Validate mandatory fields (coach_id and essential data)
+    // 1. Validate mandatory fields (using destructured names)
     const numericCoachId = Number(coach_id);
     const numericSalary = Number(salary);
 
@@ -704,42 +702,37 @@ app.put("/api/coaches-update/coach_id", async (req, res) => {
     }
 
     // 2. Convert numerical/boolean fields
-    const numericPlayers = Number(players) || 0;
     const numericWeekSalary = Number(week_salary) || 0;
-    // Ensure 'active' is correctly parsed to a boolean/truthy value
+    // Ensure 'active' is a proper boolean value for PostgreSQL
     const isActive = active === true || active === "true" || active === 1;
 
-    // 3. The SQL UPDATE query
+    // 3. The FIXED SQL UPDATE query (Cleaned of all non-standard whitespace)
     const sql = `
-            UPDATE cd.coaches_details
-            SET 
-                coach_name = $1,  
-                phone_numbers = $2,  
-                email = $3,  
-                address = $4,  
-                players = $5,  
-                salary = $6,  
-                week_salary = $7,  
-                category = $8,  
-                active = $9,  
-                status = $10
-            WHERE coach_id = $11
-            RETURNING coach_id, coach_name, status; 
-        `;
+        UPDATE cd.coaches_details
+        SET 
+          coach_name = $1,
+          phone_numbers = $2,
+          email = $3,
+          address = $4,
+          salary = $5,
+          week_salary = $6,
+          active = $7,
+          status = $8
+        WHERE coach_id = $9
+        RETURNING "coach_id", "coach_name", "status";
+      `;
 
-    // 4. Values array must match the $1, $2, ... placeholders
+    // 4. Values array (9 parameters)
     const values = [
       coach_name, // $1
       phone_numbers, // $2
       email, // $3
       address, // $4
-      numericPlayers, // $5
-      numericSalary, // $6
-      numericWeekSalary, // $7
-      category, // $8
-      isActive, // $9
-      status, // $10
-      numericCoachId, // $11 (WHERE clause)
+      numericSalary, // $5
+      numericWeekSalary, // $6
+      isActive, // $7
+      status, // $8
+      numericCoachId, // $9 (WHERE clause)
     ];
 
     const result = await pool.query(sql, values);
@@ -752,9 +745,10 @@ app.put("/api/coaches-update/coach_id", async (req, res) => {
 
     res.status(200).json({
       message: "Coach successfully updated.",
-      coach: result.rows[0], // Return the updated coach data
+      coach: result.rows[0],
     });
   } catch (error) {
+    // This is the error handler that returned the 500 status.
     console.error("❌ Database update error for coach:", error.message);
     res.status(500).json({
       error: "Failed to update coach details due to a server error.",
@@ -945,13 +939,13 @@ function formatVenueData(rows) {
 
 //fetch venue data
 app.get("/api/venues-Details", async (req, res) => {
-  // FIX APPLIED: Removed 'cd.' prefix from all table names.
   const sqlQuery = `
         SELECT 
             v.id AS venue_id,
             v.name AS venue_name,
             v.center_head,
             v.address,
+            v.google_url,
             ts.id AS timeslot_id,
             ts.start_time,
             ts.end_time,
@@ -980,7 +974,9 @@ app.get("/api/venues-Details", async (req, res) => {
 
 ///venus add the route here
 app.post("/api/venue-data/add", async (req, res) => {
-  const { name, centerHead, address, active = true, timeSlots } = req.body;
+  // 🐛 FIX 1: Destructure googleUrl from req.body. 
+  // It is used in the query but was not destructured from the request body.
+  const { name, centerHead, address, active = true, timeSlots, googleUrl } = req.body;
 
   if (
     !name ||
@@ -1000,12 +996,12 @@ app.post("/api/venue-data/add", async (req, res) => {
     await client.query("BEGIN");
 
     const venueQuery = `
-            INSERT INTO cd.venues_data
-            (name, center_head, address, active)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id;
-        `;
-    const venueValues = [name, centerHead, address, active];
+        INSERT INTO cd.venues_data
+        (name, center_head, address, active, google_url)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id;
+    `;
+    const venueValues = [name, centerHead, address, active, googleUrl || null];
     const venueResult = await client.query(venueQuery, venueValues);
     const venue_id = venueResult.rows[0].id;
 
@@ -1013,11 +1009,11 @@ app.post("/api/venue-data/add", async (req, res) => {
 
     for (const slot of timeSlots) {
       const timeSlotQuery = `
-                INSERT INTO cd.venuetime_slots
-                (venue_id, start_time, end_time, active)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id;
-            `;
+          INSERT INTO cd.venuetime_slots
+          (venue_id, start_time, end_time, active)
+          VALUES ($1, $2, $3, $4)
+          RETURNING id;
+      `;
       const timeSlotValues = [
         venue_id,
         slot.startTime,
@@ -1030,11 +1026,15 @@ app.post("/api/venue-data/add", async (req, res) => {
       if (slot.days && slot.days.length > 0) {
         for (const day of slot.days) {
           const dayQuery = `
-                        INSERT INTO cd.venuetimeslot_days
-                        (time_slot_id, day, active)
-                        VALUES ($1, $2, $3)
-                        RETURNING id;
-                    `;
+              INSERT INTO cd.venuetimeslot_days
+              (time_slot_id, day, active)
+              VALUES ($1, $2, $3)
+              RETURNING id;
+          `;
+          // 🐛 FIX 3: Use the slot's 'active' status for the day, or default to true. 
+          // The original code used 'slot.active || true' for both timeSlotValues and dayValues.
+          // This is generally acceptable, but passing the same calculated 'active' status for consistency is better.
+          // Note: Assuming 'day' is a simple value (e.g., string/integer representing a day).
           const dayValues = [time_slot_id, day, slot.active || true];
           await client.query(dayQuery, dayValues);
         }

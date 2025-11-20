@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 // Import useNavigate from react-router-dom for navigation
 import { useNavigate } from "react-router-dom";
 // New Import: Accesses the authentication context
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Card,
   CardContent,
@@ -55,18 +55,18 @@ import {
   Search,
 } from "lucide-react";
 
-// NOTE: AddNewPlayerDetails is no longer used here but kept imported for reference
-// Assumed API functions
+// Assumed API functions (assuming they are correctly defined elsewhere)
 import {
   GetPlayerDetails,
   deletePlayer,
   AddCoachdata,
   GetCoachDetails,
-  UpdateCoachdata,
-  DeactivateCoachdata
+  UpdateCoachdata, 
+  DeactivateCoachdata,
 } from "../../../api";
 
-// --- Coach Management Modal Component (FIXED: Added attendance to number conversion) ---
+
+// --- Coach Management Modal Component ---
 const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
   const [formData, setFormData] = useState(
     coachToEdit || {
@@ -110,7 +110,8 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
             active: coachToEdit.status === "Active", // Set switch based on status
           }
         : {
-            id: null,
+            // FIX: Set initial state correctly for new coach
+            coach_id: null, // Use coach_id for backend consistency
             coach_name: "",
             phone_numbers: "",
             email: "",
@@ -121,6 +122,7 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
             category: "Football",
             status: "Active",
             active: true,
+            attendance: 0,
           }
     );
   }, [coachToEdit]);
@@ -130,7 +132,7 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
     setFormData((prev) => ({
       ...prev,
       [id]:
-        // FIX: Added 'attendance' to the list of fields to be converted to a number
+        // Added 'attendance' to the list of fields to be converted to a number
         id === "players" ||
         id === "salary" ||
         id === "week_salary" ||
@@ -145,10 +147,10 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
     setIsSaving(true); // Start saving
     await onSave(formData);
     setIsSaving(false); // Stop saving
-    onClose();
+    // The modal is closed by the parent component after onSave completes
   };
 
-  const title = formData.id ? "Edit Coach" : "Add New Coach";
+  const title = formData.coach_id ? "Edit Coach" : "Add New Coach";
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -213,21 +215,6 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
               />
             </div>
 
-            {/* Players (Not editable for new coach, but kept for edit) */}
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="players" className="text-right">
-                Players
-              </Label>
-              <Input
-                id="players"
-                type="number"
-                value={formData.players}
-                onChange={handleChange}
-                className="col-span-3"
-                disabled={!formData.id} // Only editable if editing existing coach
-              />
-            </div>
-
             {/* Salary */}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="salary" className="text-right">
@@ -256,41 +243,6 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
               />
             </div>
 
-            {/* Attendance Input */}
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="attendance" className="text-right">
-                Attendance (%)
-              </Label>
-              <Input
-                id="attendance"
-                type="number"
-                value={formData.attendance || 0}
-                onChange={handleChange}
-                className="col-span-3"
-                min="0"
-                max="100"
-              />
-            </div>
-
-            {/* Category (Dropdown) */}
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="category" className="text-right">
-                Category
-              </Label>
-              <Select
-                onValueChange={handleCategoryChange}
-                value={formData.category}
-              >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Football">Football</SelectItem>
-                  <SelectItem value="Cricket">Cricket</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
 
             {/* Active (Switch) and Status Display */}
             <div className="grid grid-cols-4 items-center gap-4">
@@ -298,7 +250,7 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
                 Active
               </Label>
               <div className="col-span-3 flex items-center justify-between">
-                <span>**Status:** {formData.status}</span>
+                <span> {formData.status}</span>
                 <Switch
                   id="active"
                   checked={formData.active}
@@ -312,7 +264,7 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
               {isSaving ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <>{formData.id ? "Save Changes" : "Add Coach"}</>
+                <>{formData.coach_id ? "Save Changes" : "Add Coach"}</>
               )}
             </Button>
           </DialogFooter>
@@ -596,10 +548,8 @@ const PaginationControls = ({ currentPage, totalPages, paginate }) => {
 const StaffDashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  // FIX: Destructure the logout function from the useAuth hook
   const { logout } = useAuth();
 
-  // FIX: Declare the coaches state here to resolve "coaches is not defined" error
   const [coaches, setCoaches] = useState([
     {
       coach_id: null,
@@ -665,6 +615,9 @@ const StaffDashboard = () => {
   // --- Search State (NEW) ---
   const [searchTerm, setSearchTerm] = useState("");
 
+  // --- Status Filter State ---
+  const [filterStatus, setFilterStatus] = useState('All');
+
   // --- Pagination State (NEW) ---
   const [currentPage, setCurrentPage] = useState(1);
   const playersPerPage = 5; // Display 5 records per page, as requested
@@ -680,35 +633,36 @@ const StaffDashboard = () => {
     // Map the coaches state data back to the format expected by the modal (using coach_name instead of name)
     setEditingCoach({
       ...coach,
-      coach_name: coach.name, // Use the existing name property for the form's coach_name field
+      // Ensure 'coach_id' is used as the primary ID for the form/API
+      coach_id: coach.coach_id,
+      coach_name: coach.coach_name,
+      email: coach.email,
+      address: coach.address // Use the existing name property for the form's coach_name field
     });
     setIsCoachModalOpen(true);
   };
+
   const closeCoachModal = () => {
     setIsCoachModalOpen(false);
     setEditingCoach(null);
   };
 
-  // --- UPDATED: handleSaveCoach to include API call ---
+
   const handleSaveCoach = useCallback(
     async (newCoachData) => {
-      // 1. Prepare data for the API
       const apiData = {
         ...newCoachData,
-        name: newCoachData.coach_name,
-        coach_name: newCoachData.coach_name,
+        coach_id: newCoachData.coach_id,
+        name: newCoachData.coach_name, 
       };
 
-      if (apiData.id) {
-        // --- UPDATE EXISTING COACH ---
-        try {
-          // *** FIX APPLIED: Call API before updating local state ***
-          await UpdateCoachdata(apiData);
-
-          // Update local state only after a successful API call
+      if (apiData.coach_id) {
+       
+        try {         
+          await UpdateCoachdata(apiData);         
           setCoaches((prevCoaches) => {
-            const updatedCoach = prevCoaches.map((coach) =>
-              coach.id === apiData.id ? { ...coach, ...apiData } : coach
+            const updatedCoach = prevCoaches.map((coach) =>         
+              coach.coach_id === apiData.coach_id ? { ...coach, ...apiData } : coach
             );
             return updatedCoach;
           });
@@ -729,16 +683,14 @@ const StaffDashboard = () => {
           });
         }
       } else {
-        // --- ADD NEW COACH ---
-        try {
-          // Assuming AddCoachdata is defined and functional
+       
+        try {        
           const response = await AddCoachdata(apiData);
-
           const newCoach = {
-            ...apiData,
-            id:
+            ...apiData,           
+            coach_id:
               response?.coach?.coach_id ||
-              Math.max(...coaches.map((c) => c.id || 0), 0) + 1,
+              Math.max(...coaches.map((c) => c.coach_id || 0), 0) + 1,
             name: apiData.name,
           };
 
@@ -761,70 +713,66 @@ const StaffDashboard = () => {
           });
         }
       }
+      closeCoachModal(); 
     },
-    [coaches, toast]
+    [coaches, toast, closeCoachModal]
   );
   // -----------------------------------------------------------------------
-const handleDeleteCoach = useCallback(
-    async (coachId, coachName) => {
-        // Renamed to handleDeactivateCoach for clarity, but using your name for now
-        if (!window.confirm(`Are you sure you want to DEACTIVATE coach ${coachName}?`)) {
-            return; // User cancelled the operation
-        }
+  const handleDeleteCoach = useCallback(
+    async (coachId, coachName) => {      
+      if (
+        !window.confirm(
+          `Are you sure you want to DEACTIVATE coach ${coachName}?`
+        )
+      ) {
+        return; 
+      }
 
-        try {
-            // Call the API to deactivate the coach
-            const response = await DeactivateCoachdata(coachId);
-            
-            // The API returns the updated coach object: response.coach
-            const deactivatedCoach = response.coach;
+      try {        
+        const response = await DeactivateCoachdata(coachId);
+        const deactivatedCoach = response.coach;
+        setCoaches((prevCoaches) =>
+          prevCoaches.map((coach) => {
+            const currentId = coach.id || coach.coach_id;
+            if (currentId === coachId) {
+              return {
+                ...coach,
+                active: deactivatedCoach.status !== "Inactive", 
+                status: deactivatedCoach.status,
+              };
+            }
+            return coach;
+          })
+        );
 
-            // FIX: Update local state by MAPPING (not filtering) to show the 'Inactive' status
-            setCoaches((prevCoaches) =>
-                prevCoaches.map((coach) => {
-                    const currentId = coach.id || coach.coach_id;
-                    if (currentId === coachId) {
-                        // Apply the changes (active=FALSE, status=Inactive)
-                        return {
-                            ...coach,
-                            active: deactivatedCoach.status !== 'Inactive', // Should be false
-                            status: deactivatedCoach.status
-                        };
-                    }
-                    return coach;
-                })
-            );
-
-            toast({
-                title: "Coach Deactivated", // Use Deactivated to match the operation
-                description: `Coach ${coachName} has been successfully deactivated.`,
-                variant: "success",
-            });
-        } catch (error) {
-            console.error("Error deactivating coach:", error);
-            toast({
-                title: "Deactivation Failed",
-                description: `Failed to deactivate coach. Error: ${error.message || "Unknown API error."}`,
-                variant: "destructive",
-            });
-        }
+        toast({
+          title: "Coach Deactivated", 
+          description: `Coach ${coachName} has been successfully deactivated.`,
+          variant: "success",
+        });
+      } catch (error) {
+        console.error("Error deactivating coach:", error);
+        toast({
+          title: "Deactivation Failed",
+          description: `Failed to deactivate coach. Error: ${
+            error.message || "Unknown API error."
+          }`,
+          variant: "destructive",
+        });
+      }
     },
     [setCoaches, toast]
-);
+  );
 
-  // --- Player Modal/Navigation Handlers (Kept/Updated) ---
-  const openAddPlayerModal = () => {
-    // Navigate to the new /add-players page instead of opening a modal
+  const openAddPlayerModal = () => {   
     navigate("/add-players");
   };
 
   const openEditPlayerModal = (player) => {
-    // FIX: Correctly format the URL path to include both IDs.
-    // Assuming player.id is the Academy ID and player.player_id is the Player ID
     navigate(`/edit-player/${player.id}/${player.player_id}`);
   };
 
-  // --- DELETE Player Logic (FIXED FOR TOAST AND ROBUST ERROR MESSAGE) ---
+
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [playerToDelete, setPlayerToDelete] = useState(null);
 
@@ -842,7 +790,6 @@ const handleDeleteCoach = useCallback(
     if (!playerToDelete) return;
 
     try {
-      // Assume deletePlayer accepts the player's primary ID (id or player_id)
       await deletePlayer(playerToDelete.id);
 
       setPlayers((prevPlayers) =>
@@ -852,12 +799,12 @@ const handleDeleteCoach = useCallback(
       toast({
         title: "Player Deleted",
         description: `The record for ${playerToDelete.name} has been successfully removed.`,
-        variant: "success", // FIXED: Changed to 'success'
+        variant: "success",
       });
     } catch (error) {
       toast({
         title: "Delete Failed",
-        // FIXED: Using a more generic message that includes error.message but is safer
+        
         description: `Failed to delete player. Error: ${
           error.message ||
           "Unknown API error. Please check the API implementation."
@@ -868,12 +815,10 @@ const handleDeleteCoach = useCallback(
 
     closeDeletePlayerModal();
   };
-  // --------------------------------------------------
-  const fetchCoachData = async () => {
-    // Renamed for clarity
+  
+  const fetchCoachData = async () => {   
     setIsLoading(true);
-    try {
-      // <-- FIX: Changed to call GetCoachDetails
+    try {      
       const data = await GetCoachDetails();
 
       const mappedData = data.map((coach) => ({
@@ -888,28 +833,25 @@ const handleDeleteCoach = useCallback(
         attendance: Number(coach.attendance) || 0,
       }));
 
-      // <-- FIX: Ensure this state setter matches your component definition
+     
       setCoaches(mappedData);
     } catch (err) {
-      // <-- FIX: Corrected error message
+     
       console.error("Failed to fetch coach data:", err);
       setError("Failed to fetch coach data.");
     } finally {
       setIsLoading(false);
     }
   };
-  useEffect(() => {
-    fetchCoachData(); // <-- This (lowercase 'c') causes the error
-  }, []);
-
-  // --- PLAYER DATA FETCHING FUNCTION (Kept) ---
+  useEffect(() => {    
+    fetchCoachData();
+  }, []); 
+  
   const fetchPlayers = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await GetPlayerDetails();
-
-      // Map database keys (based on user's SQL query fields) to frontend keys
+      const data = await GetPlayerDetails();      
       const mappedData = data.map((player) => ({
         id: player.id || player.ID || Math.random(),
         player_id: player.Player_ID || player.player_id || "N/A",
@@ -924,9 +866,6 @@ const handleDeleteCoach = useCallback(
       }));
 
       setPlayers(mappedData);
-
-      // OPTIONAL: Reset to page 1 after fetching data to show the latest changes
-      // setCurrentPage(1);
     } catch (err) {
       setError(
         "Failed to fetch player data. Check server status and API configuration."
@@ -943,14 +882,13 @@ const handleDeleteCoach = useCallback(
     }
   }, [toast]);
 
-  // --- useEffect to Fetch Players on Component Mount (Kept) ---
   useEffect(() => {
     fetchPlayers();
   }, [fetchPlayers]);
 
   const [activeTab, setActiveTab] = useState("registrations");
 
-  // --- Registration Review State and Handlers (Kept) ---
+ 
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewingRegistration, setReviewingRegistration] = useState(null);
 
@@ -965,7 +903,6 @@ const handleDeleteCoach = useCallback(
   };
   // --------------------------------------------------
 
-  // --- Payment Action Handlers (Kept) ---
   const handleSendReminders = () => {
     toast({
       title: "Reminders Sent",
@@ -1000,45 +937,42 @@ const handleDeleteCoach = useCallback(
       variant: "secondary",
     });
   };
-  
-  // The mock logout function is now removed, and the real one is obtained from useAuth() above.
 
-  // --- Sign Out Handler (Kept) ---
+
   const handleSignOut = () => {
-    // 1. Log out the user (clears session/token)
     logout();
-    // 2. Show success notification
     toast({
       title: "Signed Out",
       description:
         "You have been securely logged out and redirected to the login page.",
       variant: "success",
     });
-    // 3. FIX: Navigate to the /auth route
     navigate("/auth");
   };
 
-
-  // --- Filtering Logic (NEW) ---
   const filteredPlayers = React.useMemo(() => {
-    if (!searchTerm) return players;
+    let currentPlayers = players;
+
+    if (filterStatus !== 'All') {
+      currentPlayers = currentPlayers.filter(
+        (player) => player.status === filterStatus
+      );
+    }
+
+    if (!searchTerm) return currentPlayers;
 
     const lowerCaseSearch = searchTerm.toLowerCase().trim();
 
-    return players.filter((player) => {
-      // Search by Name
+    return currentPlayers.filter((player) => {
       if (player.name && player.name.toLowerCase().includes(lowerCaseSearch)) {
         return true;
       }
-      // Search by Player ID
       if (
         player.player_id &&
         player.player_id.toLowerCase().includes(lowerCaseSearch)
       ) {
         return true;
       }
-      // Search by Phone Number (numbers)
-      // Strip non-numeric characters for better matching against phone_no
       if (player.phone_no) {
         const cleanedPhone = player.phone_no.replace(/\D/g, "");
         if (cleanedPhone.includes(lowerCaseSearch.replace(/\D/g, ""))) {
@@ -1047,14 +981,11 @@ const handleDeleteCoach = useCallback(
       }
       return false;
     });
-  }, [players, searchTerm]);
+  }, [players, searchTerm, filterStatus]); 
 
-  // --- Pagination Logic (UPDATED) ---
-  // Use filteredPlayers for pagination
   const playersToPaginate = filteredPlayers;
   const indexOfLastPlayer = currentPage * playersPerPage;
   const indexOfFirstPlayer = indexOfLastPlayer - playersPerPage;
-  // Slice the players array to get only the records for the current page
   const currentPlayers = playersToPaginate.slice(
     indexOfFirstPlayer,
     indexOfLastPlayer
@@ -1065,50 +996,41 @@ const handleDeleteCoach = useCallback(
     setCurrentPage(pageNumber);
   };
 
-  // Reset pagination when search term changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, filterStatus]); 
 
   const handleTabClick = (value) => {
     if (value === "venues") {
-      // Redirect to the /venues route
       navigate("/venues");
-    } else if (value === "players") {
-      // Redirect to the /add-player route (assuming this is where the AddPlayerForm lives)
+    } else if (value === "players") {     
       navigate("/add-player");
     }
-    // You can add more conditions here for other tabs
+   
   };
 
   return (
     <div className="space-y-6">
-      {/* Modals */}
       <CoachFormDialog
         isOpen={isCoachModalOpen}
         onClose={closeCoachModal}
         coachToEdit={editingCoach}
         onSave={handleSaveCoach}
       />
-
-      {/* Registration Review Modal */}
+   
       <RegistrationReviewDialog
         isOpen={isReviewModalOpen}
         onClose={closeReviewModal}
         registration={reviewingRegistration}
       />
-
-      {/* Player Delete Confirmation Modal */}
+      
       <DeleteConfirmationDialog
         isOpen={isDeleteModalOpen}
         onClose={closeDeletePlayerModal}
         onConfirm={handleDeletePlayer}
         name={playerToDelete?.name || "this player"}
       />
-
-
-
-      {/* Header (with Sign Out Button) */}
+     
       <div className="bg-gradient-primary rounded-xl p-6 text-primary-foreground flex justify-between items-start">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold mb-2">Staff Administration</h1>
@@ -1116,8 +1038,7 @@ const handleDeleteCoach = useCallback(
             Complete academy management and oversight
           </p>
         </div>
-
-        {/* Sign Out Button */}
+       
         <Button
           variant="secondary"
           className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground"
@@ -1128,9 +1049,7 @@ const handleDeleteCoach = useCallback(
         </Button>
       </div>
 
-      {/* --- Stats Overview --- */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {/* FIX: Use players.length for consistency with state, add loader */}
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -1154,7 +1073,6 @@ const handleDeleteCoach = useCallback(
               <UserPlus className="h-5 w-5 text-primary" />
               <div>
                 <p className="text-2xl font-bold">
-                  {/* Now 'coaches' is defined and can be filtered */}
                   {coaches.filter((c) => c.status === "Active").length}
                 </p>
                 <p className="text-xs text-muted-foreground">Active Coaches</p>
@@ -1205,7 +1123,6 @@ const handleDeleteCoach = useCallback(
         </Card>
       </div>
 
-      {/* --- Tabs Section --- */}
       <Tabs
         value={activeTab}
         onValueChange={setActiveTab}
@@ -1217,7 +1134,10 @@ const handleDeleteCoach = useCallback(
           <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="coaches">Coach Management</TabsTrigger>
           <TabsTrigger value="settings">Academy Settings</TabsTrigger>
-          <TabsTrigger value="venues"  onClick={() => handleTabClick("venues")}> Venue Management</TabsTrigger>
+          <TabsTrigger value="venues" onClick={() => handleTabClick("venues")}>
+            {" "}
+            Venue Management
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="registrations" className="space-y-4">
@@ -1283,10 +1203,10 @@ const handleDeleteCoach = useCallback(
                 </CardDescription>
               </div>
 
-              {/* RIGHT SIDE: Search and Button (grouped in a flex container) */}
-              <div className="flex flex-col sm:flex-row items-end gap-3 w-full max-w-sm ml-auto">
+              {/* RIGHT SIDE: Search, Filter, and Button (grouped in a flex container) */}
+              <div className="flex flex-col sm:flex-row items-end gap-3 w-full max-w-lg ml-auto">
                 {/* Search Input */}
-                <div className="relative w-full">
+                <div className="relative w-full sm:w-[250px]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     type="text"
@@ -1296,6 +1216,21 @@ const handleDeleteCoach = useCallback(
                     className="pl-10 w-full"
                   />
                 </div>
+
+                {/* Status Filter Dropdown (FIXED & CONNECTED TO STATE) */}
+                <Select value={filterStatus} onValueChange={setFilterStatus}>
+                  <SelectTrigger className="w-full sm:w-[150px] flex-shrink-0">
+                    <span className="text-muted-foreground mr-2">Status:</span>
+                    <SelectValue placeholder="All Statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All Statuses</SelectItem>
+                    <SelectItem value="Active">Active</SelectItem>
+                    <SelectItem value="Inactive">Inactive</SelectItem>
+                    {/* Add any other status options you might have */}
+                    <SelectItem value="Unknown">Unknown</SelectItem>
+                  </SelectContent>
+                </Select>
 
                 {/* Add New Player Button */}
                 <Button
@@ -1320,8 +1255,8 @@ const handleDeleteCoach = useCallback(
                   <div className="flex flex-col justify-center items-center p-8 text-muted-foreground">
                     <AlertCircle className="h-8 w-8 mb-2" />
                     <p className="font-medium">
-                      {searchTerm
-                        ? `No results found for "${searchTerm}"`
+                      {searchTerm || filterStatus !== 'All'
+                        ? `No results found for current filters.`
                         : "No Player Records Found"}
                     </p>
                     <p className="text-sm">
@@ -1346,7 +1281,6 @@ const handleDeleteCoach = useCallback(
                           {(player.name || "").charAt(0).toUpperCase() || "-"}
                         </div>
                         <div className="space-y-1">
-                          {/* FIX: Changed <p> to <div> to resolve DOM nesting warning (div inside p) */}
                           <div className="font-medium">
                             {player.name}{" "}
                             <Badge
@@ -1536,20 +1470,10 @@ const handleDeleteCoach = useCallback(
                         <p className="font-medium flex items-center gap-2">
                           {coach.coach_name}
                           <span className="text-sm font-normal text-gray-500">
-                            ({coach.phone_numbers}) • ({coach.week_salary}/week)
+                            ({coach.phone_numbers}) • ({coach.week_salary}/session)
                           </span>
                         </p>
-
-                        {/* Line 2: Category, Players, and Attendance */}
-                        <p className="text-sm text-muted-foreground">
-                          <span className="font-semibold">
-                            {coach.category}
-                          </span>
-                          <span className="mx-2">•</span>
-                          {coach.players} players
-                          <span className="mx-2">•</span>
-                          {coach.attendance}% attendance
-                        </p>
+                       
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
