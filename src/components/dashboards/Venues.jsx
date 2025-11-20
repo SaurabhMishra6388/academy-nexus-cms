@@ -48,7 +48,7 @@ import {
   addVenueData, 
   fetchVenuesdetails,
   // Assuming deleteVenue is available from this import
-  // deleteVenue, 
+   deleteVenue 
 } from "../../../api";
 
 
@@ -145,15 +145,9 @@ export default function StaffDashboard() {
     async function loadVenues() {
       try {
         const fetchedVenues = await fetchVenuesdetails();
-        
-        // Normalize incoming API data to match the display structure
         const normalizedVenues = fetchedVenues.map(v => ({
-            ...v,
-            // Assuming API response has a flattened timeSlots array
+            ...v,           
             operatingHours: v.timeSlots || v.operatingHours || [],
-            // Ensure the local state property name is consistent with the form input
-            // The server uses 'google_url', but the component should use 'googleMapsUrl'
-            googleMapsUrl: v.google_url || v.googleMapsUrl || '', 
         }));
         setVenues(normalizedVenues);
       } catch (e) {
@@ -260,18 +254,19 @@ export default function StaffDashboard() {
     if (
       !venueForm.name ||
       !venueForm.centerHead ||
-      !venueForm.address
+      !venueForm.address ||
+      !venueForm.googleMapsUrl // Added for required validation
+
     ) {
       toast({
         title: "Validation Error",
-        description: "Please fill in all required fields (Name, Head, Address).",
+        description: "Please fill in all required fields (Name, Head, Address, Google Maps URL).",
         variant: "destructive",
       });
       return;
     }
     
     // The server endpoint requires timeSlots to not be empty for a valid request
-    // We adjust the validation here to ensure we only proceed if we have valid venue info OR if there's no need for slots.
     // For this app, let's enforce that a venue must have at least one valid slot to be added.
     if (!hasValidSlots && submissionSlots.length === 0) {
       toast({
@@ -306,7 +301,9 @@ export default function StaffDashboard() {
           name: venueForm.name,
           centerHead: venueForm.centerHead,
           address: venueForm.address,
-          googleUrl: venueForm.googleMapsUrl, // <--- Sent to API using 'googleUrl' as per backend
+          // FIX: Use 'googleUrl' for the API payload as the backend expects
+          googleUrl: venueForm.googleMapsUrl, 
+          // Removed unnecessary 'day' field from the submission payload
           // Sending the flattened array of valid slots
           timeSlots: submissionSlots,
       };
@@ -319,7 +316,8 @@ export default function StaffDashboard() {
         name: venueForm.name,
         centerHead: venueForm.centerHead,
         address: venueForm.address,
-        googleMapsUrl: venueForm.googleMapsUrl, // <--- Store as googleMapsUrl for display
+        // FIX: Store the googleMapsUrl for display
+        googleMapsUrl: venueForm.googleMapsUrl, 
         // The display logic in the Venue List expects the flattened array
         operatingHours: submissionSlots, 
       };
@@ -345,27 +343,28 @@ export default function StaffDashboard() {
   };
 
   // NOTE: Keep this commented out or ensure deleteVenue is imported correctly
-  const handleDeleteVenue = async (id) => {
-    try {
-      // await deleteVenue(id); 
+ const handleDeleteVenue = async (id) => {
+  try {
+    const result = await deleteVenue(id);
 
-      const updated = venues.filter((v) => v.id !== id);
-      setVenues(updated);
+    // Update local state only if delete succeeded
+    const updated = venues.filter((v) => v.id !== id);
+    setVenues(updated);
 
-      toast({
-        title: "Deleted",
-        description: `Venue ID ${id} successfully removed.`,
-        status: "success",
-      });
-    } catch (error) {
-      console.error("Deletion failed:", error);
-      toast({
-        title: "Error",
-        description: error.message || "Failed to remove venue.",
-        status: "error",
-      });
-    }
-  };
+    toast({
+      title: "Deleted",
+      description: result.message || `Venue ID ${id} successfully removed.`,
+      variant: "success",
+    });
+  } catch (error) {
+    console.error("Deletion failed:", error);
+    toast({
+      title: "Error",
+      description: error.message || "Failed to remove venue.",
+      variant: "destructive",
+    });
+  }
+};
 
 
   const unassignedPlayers = players.filter((p) => !p.coachId);
@@ -425,7 +424,7 @@ export default function StaffDashboard() {
           title: "Assignment Failed",
           description:
             error.message || "Could not assign coach due to a server error.",
-          variant: "destructive",
+            variant: "destructive",
         });
       }
 
@@ -741,7 +740,7 @@ export default function StaffDashboard() {
 
                   {/* Google Maps URL Input */}
                   <div>
-                    <Label>Google Maps URL</Label>
+                    <Label>Google Maps URL *</Label>
                     <Input
                       type="url"
                       placeholder="https://maps.app.goo.gl/..."
@@ -752,6 +751,7 @@ export default function StaffDashboard() {
                           googleMapsUrl: e.target.value,
                         })
                       }
+                      required
                     />
                   </div>
 
@@ -940,7 +940,7 @@ export default function StaffDashboard() {
                 </form>
               )}
 
-              {/* VENUE LIST DISPLAY */}
+              {/* VENUE LIST DISPLAY - FIXED TO GROUP SLOTS BY DAY */}
               <div className="space-y-3 mt-6">
                 {venues.length === 0 && (
                   <div className="text-center p-6 opacity-70 border rounded">
@@ -949,70 +949,94 @@ export default function StaffDashboard() {
                   </div>
                 )}
 
-                {venues.map((v) => (
-                  <Card key={v.id} className="shadow-sm">
-                    <CardHeader className="flex flex-row justify-between items-start space-y-0">
-                      <div>
-                        {/* Swapped centerHead and name for correct display */}
-                        <CardTitle>{v.name}</CardTitle>
-                        <CardDescription>
-                          Center Head: {v.centerHead}
-                        </CardDescription>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleDeleteVenue(v.id)}
-                      >
-                        Delete
-                      </Button>
-                    </CardHeader>
-                    <CardContent>
-                      {/* Address */}
-                      <p className="text-sm opacity-70 mb-2">Address:</p>
-                      <p className="text-sm mb-4">{v.address}</p>
+                {venues.map((v) => {
+                    // Group the flattened operatingHours array by day
+                    const groupedHours = v.operatingHours.reduce((acc, slot) => {
+                        const day = slot.day || 'Unknown Day';
+                        if (!acc[day]) {
+                            acc[day] = [];
+                        }
+                        acc[day].push(slot);
+                        return acc;
+                    }, {});
 
-                      {/* Google Maps URL - FIX APPLIED HERE */}
-                      {v.googleMapsUrl && (
-                        <div className="mb-4">
-                          <p className="text-sm opacity-70 mb-1">
-                            Google Maps Link:
-                          </p>
-                          <a
-                            href={v.googleMapsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-blue-600 hover:underline truncate block"
-                          >
-                            {v.googleMapsUrl}
-                          </a>
-                        </div>
-                      )}
+                    // Get a sorted list of days for consistent display order
+                    const sortedDays = weekDays.filter(day => groupedHours[day]);
+                    const unknownDays = Object.keys(groupedHours).filter(day => !weekDays.includes(day));
 
-                      {/* Operating Hours Display */}
-                      <p className="text-sm font-medium mb-2">
-                        Operating Hours:
-                      </p>
-                      {/* Assuming v.operatingHours is the flattened array from the API response */}
-                      {v.operatingHours?.map((s, i) => (
-                        <div
-                          key={i}
-                          className="p-3 border rounded mb-2 bg-secondary/20"
-                        >
-                          <div className="flex items-center gap-2 mb-1">
-                            <Clock className="text-primary h-4 w-4" />
-                            <span className="font-medium">
-                              {/* Day is correctly read from the 'day' property in the flattened array */}
-                              {s.day || "N/A"}
-                            </span>
-                            <span className="text-sm ml-2">
-                              {s.startTime || "N/A"} - {s.endTime || "N/A"}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                ))}
+                    return (
+                        <Card key={v.id} className="shadow-sm">
+                            <CardHeader className="flex flex-row justify-between items-start space-y-0">
+                                <div>
+                                    <CardTitle>{v.name}</CardTitle>
+                                    <CardDescription>
+                                        Center Head: {v.centerHead}
+                                    </CardDescription>
+                                </div>
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => handleDeleteVenue(v.id)}
+                                >
+                                    Delete
+                                </Button>
+                            </CardHeader>
+                            <CardContent>
+                                {/* Address */}
+                                <p className="text-sm opacity-70 mb-2">Address:</p>
+                                <p className="text-sm mb-4">{v.address}</p>
+
+                               {/* Google Maps Link - FIX: Use v.googleMapsUrl */}
+                                {v.googleMapsUrl && (
+                                    <div className="mb-4">
+                                        <p className="text-sm opacity-70 mb-1">
+                                            Google Maps Link:
+                                        </p>
+                                        <a
+                                            href={v.googleMapsUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-blue-600 hover:underline truncate block"
+                                        >
+                                            {v.googleMapsUrl}
+                                        </a>
+                                    </div>
+                                )}
+                               
+
+                                {/* Operating Hours Display - Grouped by Day */}
+                                <p className="text-sm font-medium mb-2">
+                                    Operating Hours:
+                                </p>
+                                <div className="space-y-2">
+                                    {[...sortedDays, ...unknownDays].map((day) => {
+                                        const slots = groupedHours[day];
+                                        return (
+                                            <div
+                                                key={day}
+                                                className="p-3 border rounded bg-secondary/20"
+                                            >
+                                                <div className="flex items-center gap-2 font-bold mb-1">
+                                                    <Clock className="text-primary h-4 w-4" />
+                                                    <span>{day}</span>
+                                                </div>
+                                                <div className="pl-6 space-y-1 text-sm">
+                                                    {slots.map((slot, i) => (
+                                                        <p key={i}>
+                                                            {slot.startTime || "N/A"} - {slot.endTime || "N/A"}
+                                                        </p>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {v.operatingHours?.length === 0 && (
+                                        <p className="text-sm opacity-70">No operating hours defined.</p>
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -1021,3 +1045,4 @@ export default function StaffDashboard() {
     </div>
   );
 }
+

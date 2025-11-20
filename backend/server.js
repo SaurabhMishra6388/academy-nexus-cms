@@ -955,6 +955,7 @@ app.get("/api/venues-Details", async (req, res) => {
             ON ts.venue_id = v.id
         LEFT JOIN cd.venuetimeslot_days d
             ON d.time_slot_id = ts.id
+            WHERE v.active = true
         ORDER BY v.id, ts.id, d.day;
     `;
 
@@ -1062,64 +1063,62 @@ app.post("/api/venue-data/add", async (req, res) => {
 });
 
 //delete venue route
+// server.js (or wherever your route lives)
 app.delete("/api/venues-delete/:id", async (req, res) => {
-  const venueId = parseInt(req.params.id);
-  if (isNaN(venueId)) {
-    return res.status(400).send({ error: "Invalid venue ID provided." });
+  const venueId = Number(req.params.id);
+  if (!Number.isInteger(venueId) || venueId <= 0) {
+    return res.status(400).json({ error: "Invalid venue ID provided." });
   }
+
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
-    const deleteDaysQuery = `UPDATE cd.venuetimeslot_days SET active = false , updated_at = CURRENT_TIMESTAMP WHERE venue_id = $1           
-        `;
+
+    // FIXED — changed venue_id → venueid (or your real FK)
+    const deleteDaysQuery = `
+      UPDATE cd.venuetimeslot_days
+      SET active = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `;
     const resultDays = await client.query(deleteDaysQuery, [venueId]);
-    console.log(
-      `Deleted ${resultDays.rowCount} time slot days for venue ID: ${venueId}`
-    );
 
     const deleteSlotsQuery = `
-           UPDATE cd.venuetime_slots SET active = false , updated_at = CURRENT_TIMESTAMP WHERE venue_id = $1
-        `;
+      UPDATE cd.venuetime_slots
+      SET active = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `;
     const resultSlots = await client.query(deleteSlotsQuery, [venueId]);
-    console.log(
-      `Deleted ${resultSlots.rowCount} time slots for venue ID: ${venueId}`
-    );
 
     const deleteVenueQuery = `
-            UPDATE cd.venues_data SET active = false , updated_at = CURRENT_TIMESTAMP WHERE id = $1
-        `;
+      UPDATE cd.venues_data
+      SET active = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `;
     const resultVenue = await client.query(deleteVenueQuery, [venueId]);
 
     if (resultVenue.rowCount === 0) {
       await client.query("ROLLBACK");
-      return res
-        .status(404)
-        .send({ error: `Venue with ID ${venueId} not found.` });
+      return res.status(404).json({ error: `Venue with ID ${venueId} not found.` });
     }
-    console.log(`Deleted venue with ID: ${venueId}`);
+
     await client.query("COMMIT");
-    console.log("✅ Venue deletion successful (Transaction Committed).");
-    res
-      .status(200)
-      .send({
-        message: `Venue ID ${venueId} and all related data deleted successfully.`,
-      });
-  } catch (error) {
+    res.status(200).json({
+      message: `Venue ID ${venueId} and related data deactivated successfully.`,
+    });
+  } catch (err) {
     await client.query("ROLLBACK");
-    console.error(
-      "❌ Venue deletion failed (Transaction Rolled Back):",
-      error.message
-    );
-    res
-      .status(500)
-      .send({
-        error: "Failed to delete venue due to a server or database error.",
-      });
+    console.error("Venue deletion failed:", err.stack);
+    res.status(500).json({ error: "Failed to delete venue due to a server or database error." });
   } finally {
     client.release();
   }
 });
+
+
 
 //Start this serever coach details and Database dashboard working fine
 // The SQL Query Constant
