@@ -162,7 +162,7 @@ useEffect(() => {
         <div className="flex-grow">
           <h1 className="text-2xl font-bold mb-2">Parent Dashboard</h1>
           <p className="text-primary-foreground/80">
-            Welcome back,{" "}
+            Welcome{" "}
             <span className="font-semibold">{user?.name || "Parent"}</span>
           </p>
         </div>
@@ -306,7 +306,7 @@ useEffect(() => {
             Skill Progress
           </CardTitle>
           <CardDescription>
-            Development across key football skills
+            Development across all key skills
           </CardDescription>
         </CardHeader>
         <CardContent>

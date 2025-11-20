@@ -469,7 +469,7 @@ const CoachDashboard = () => {
                   Mark Attendance
                 </CardTitle>
                 <CardDescription>
-                  Select players present/absent for today's session
+                  Mark players' attendance for current session.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -502,7 +502,7 @@ const CoachDashboard = () => {
                               isPresent ? "text-success" : "text-destructive"
                             }`}
                           >
-                            {/* {isPresent ? "Present" : "Absent"} */}
+                            {isPresent ? "Present" : "Absent"}
                           </span>
 
                           {/* Toggle Switch Control */}

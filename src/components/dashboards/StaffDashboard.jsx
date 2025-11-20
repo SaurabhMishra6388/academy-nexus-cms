@@ -3,6 +3,8 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 // New Import: Accesses the authentication context
 import { useAuth } from "@/contexts/AuthContext";
+import { MapPin } from "lucide-react";
+import { IndianRupee } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -61,10 +63,9 @@ import {
   deletePlayer,
   AddCoachdata,
   GetCoachDetails,
-  UpdateCoachdata, 
+  UpdateCoachdata,
   DeactivateCoachdata,
 } from "../../../api";
-
 
 // --- Coach Management Modal Component ---
 const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
@@ -242,7 +243,6 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
                 className="col-span-3"
               />
             </div>
-
 
             {/* Active (Switch) and Status Display */}
             <div className="grid grid-cols-4 items-center gap-4">
@@ -580,8 +580,8 @@ const StaffDashboard = () => {
   const pendingRegistrations = [
     {
       id: 1,
-      name: "Oliver Smith",
-      parent: "John Smith",
+      name: "Aarya Palai",
+      parent: "Avinash Palai",
       date: "2024-02-20",
       status: "Pending Payment",
     },
@@ -594,8 +594,8 @@ const StaffDashboard = () => {
     },
     {
       id: 3,
-      name: "Ethan Brown",
-      parent: "Lisa Brown",
+      name: "Alok Biswas",
+      parent: "Biswas",
       date: "2024-02-18",
       status: "Pending Payment",
     },
@@ -616,7 +616,7 @@ const StaffDashboard = () => {
   const [searchTerm, setSearchTerm] = useState("");
 
   // --- Status Filter State ---
-  const [filterStatus, setFilterStatus] = useState('All');
+  const [filterStatus, setFilterStatus] = useState("All");
 
   // --- Pagination State (NEW) ---
   const [currentPage, setCurrentPage] = useState(1);
@@ -637,7 +637,7 @@ const StaffDashboard = () => {
       coach_id: coach.coach_id,
       coach_name: coach.coach_name,
       email: coach.email,
-      address: coach.address // Use the existing name property for the form's coach_name field
+      address: coach.address, // Use the existing name property for the form's coach_name field
     });
     setIsCoachModalOpen(true);
   };
@@ -647,22 +647,22 @@ const StaffDashboard = () => {
     setEditingCoach(null);
   };
 
-
   const handleSaveCoach = useCallback(
     async (newCoachData) => {
       const apiData = {
         ...newCoachData,
         coach_id: newCoachData.coach_id,
-        name: newCoachData.coach_name, 
+        name: newCoachData.coach_name,
       };
 
       if (apiData.coach_id) {
-       
-        try {         
-          await UpdateCoachdata(apiData);         
+        try {
+          await UpdateCoachdata(apiData);
           setCoaches((prevCoaches) => {
-            const updatedCoach = prevCoaches.map((coach) =>         
-              coach.coach_id === apiData.coach_id ? { ...coach, ...apiData } : coach
+            const updatedCoach = prevCoaches.map((coach) =>
+              coach.coach_id === apiData.coach_id
+                ? { ...coach, ...apiData }
+                : coach
             );
             return updatedCoach;
           });
@@ -683,11 +683,10 @@ const StaffDashboard = () => {
           });
         }
       } else {
-       
-        try {        
+        try {
           const response = await AddCoachdata(apiData);
           const newCoach = {
-            ...apiData,           
+            ...apiData,
             coach_id:
               response?.coach?.coach_id ||
               Math.max(...coaches.map((c) => c.coach_id || 0), 0) + 1,
@@ -713,22 +712,22 @@ const StaffDashboard = () => {
           });
         }
       }
-      closeCoachModal(); 
+      closeCoachModal();
     },
     [coaches, toast, closeCoachModal]
   );
   // -----------------------------------------------------------------------
   const handleDeleteCoach = useCallback(
-    async (coachId, coachName) => {      
+    async (coachId, coachName) => {
       if (
         !window.confirm(
           `Are you sure you want to DEACTIVATE coach ${coachName}?`
         )
       ) {
-        return; 
+        return;
       }
 
-      try {        
+      try {
         const response = await DeactivateCoachdata(coachId);
         const deactivatedCoach = response.coach;
         setCoaches((prevCoaches) =>
@@ -737,7 +736,7 @@ const StaffDashboard = () => {
             if (currentId === coachId) {
               return {
                 ...coach,
-                active: deactivatedCoach.status !== "Inactive", 
+                active: deactivatedCoach.status !== "Inactive",
                 status: deactivatedCoach.status,
               };
             }
@@ -746,7 +745,7 @@ const StaffDashboard = () => {
         );
 
         toast({
-          title: "Coach Deactivated", 
+          title: "Coach Deactivated",
           description: `Coach ${coachName} has been successfully deactivated.`,
           variant: "success",
         });
@@ -764,14 +763,13 @@ const StaffDashboard = () => {
     [setCoaches, toast]
   );
 
-  const openAddPlayerModal = () => {   
+  const openAddPlayerModal = () => {
     navigate("/add-players");
   };
 
   const openEditPlayerModal = (player) => {
     navigate(`/edit-player/${player.id}/${player.player_id}`);
   };
-
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [playerToDelete, setPlayerToDelete] = useState(null);
@@ -804,7 +802,7 @@ const StaffDashboard = () => {
     } catch (error) {
       toast({
         title: "Delete Failed",
-        
+
         description: `Failed to delete player. Error: ${
           error.message ||
           "Unknown API error. Please check the API implementation."
@@ -815,10 +813,10 @@ const StaffDashboard = () => {
 
     closeDeletePlayerModal();
   };
-  
-  const fetchCoachData = async () => {   
+
+  const fetchCoachData = async () => {
     setIsLoading(true);
-    try {      
+    try {
       const data = await GetCoachDetails();
 
       const mappedData = data.map((coach) => ({
@@ -833,25 +831,23 @@ const StaffDashboard = () => {
         attendance: Number(coach.attendance) || 0,
       }));
 
-     
       setCoaches(mappedData);
     } catch (err) {
-     
       console.error("Failed to fetch coach data:", err);
       setError("Failed to fetch coach data.");
     } finally {
       setIsLoading(false);
     }
   };
-  useEffect(() => {    
+  useEffect(() => {
     fetchCoachData();
-  }, []); 
-  
+  }, []);
+
   const fetchPlayers = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await GetPlayerDetails();      
+      const data = await GetPlayerDetails();
       const mappedData = data.map((player) => ({
         id: player.id || player.ID || Math.random(),
         player_id: player.Player_ID || player.player_id || "N/A",
@@ -888,7 +884,6 @@ const StaffDashboard = () => {
 
   const [activeTab, setActiveTab] = useState("registrations");
 
- 
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewingRegistration, setReviewingRegistration] = useState(null);
 
@@ -938,7 +933,6 @@ const StaffDashboard = () => {
     });
   };
 
-
   const handleSignOut = () => {
     logout();
     toast({
@@ -953,7 +947,7 @@ const StaffDashboard = () => {
   const filteredPlayers = React.useMemo(() => {
     let currentPlayers = players;
 
-    if (filterStatus !== 'All') {
+    if (filterStatus !== "All") {
       currentPlayers = currentPlayers.filter(
         (player) => player.status === filterStatus
       );
@@ -981,7 +975,7 @@ const StaffDashboard = () => {
       }
       return false;
     });
-  }, [players, searchTerm, filterStatus]); 
+  }, [players, searchTerm, filterStatus]);
 
   const playersToPaginate = filteredPlayers;
   const indexOfLastPlayer = currentPage * playersPerPage;
@@ -998,15 +992,14 @@ const StaffDashboard = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus]); 
+  }, [searchTerm, filterStatus]);
 
   const handleTabClick = (value) => {
     if (value === "venues") {
       navigate("/venues");
-    } else if (value === "players") {     
+    } else if (value === "players") {
       navigate("/add-player");
     }
-   
   };
 
   return (
@@ -1017,20 +1010,20 @@ const StaffDashboard = () => {
         coachToEdit={editingCoach}
         onSave={handleSaveCoach}
       />
-   
+
       <RegistrationReviewDialog
         isOpen={isReviewModalOpen}
         onClose={closeReviewModal}
         registration={reviewingRegistration}
       />
-      
+
       <DeleteConfirmationDialog
         isOpen={isDeleteModalOpen}
         onClose={closeDeletePlayerModal}
         onConfirm={handleDeletePlayer}
         name={playerToDelete?.name || "this player"}
       />
-     
+
       <div className="bg-gradient-primary rounded-xl p-6 text-primary-foreground flex justify-between items-start">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold mb-2">Staff Administration</h1>
@@ -1038,7 +1031,7 @@ const StaffDashboard = () => {
             Complete academy management and oversight
           </p>
         </div>
-       
+
         <Button
           variant="secondary"
           className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground"
@@ -1049,7 +1042,22 @@ const StaffDashboard = () => {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        <Card className="shadow-card">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-yellow-500" />
+              <div>
+                <p className="text-2xl font-bold">
+                  {staffData.pendingRegistrations}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Pending Registrations
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -1070,38 +1078,10 @@ const StaffDashboard = () => {
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <UserPlus className="h-5 w-5 text-primary" />
+              <IndianRupee className="h-5 w-5 text-success" />
               <div>
                 <p className="text-2xl font-bold">
-                  {coaches.filter((c) => c.status === "Active").length}
-                </p>
-                <p className="text-xs text-muted-foreground">Active Coaches</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-yellow-500" />
-              <div>
-                <p className="text-2xl font-bold">
-                  {staffData.pendingRegistrations}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Pending Registrations
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-success" />
-              <div>
-                <p className="text-2xl font-bold">
-                  ${staffData.monthlyRevenue.toLocaleString()}
+                  ₹{staffData.monthlyRevenue.toLocaleString()}
                 </p>
                 <p className="text-xs text-muted-foreground">Monthly Revenue</p>
               </div>
@@ -1117,6 +1097,32 @@ const StaffDashboard = () => {
                   {staffData.completionRate}%
                 </p>
                 <p className="text-xs text-muted-foreground">Completion Rate</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-primary" />
+              <div>
+                <p className="text-2xl font-bold">
+                  {coaches.filter((c) => c.status === "Active").length}
+                </p>
+                <p className="text-xs text-muted-foreground">Active Coaches</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-blue-600" />
+              <div>
+                <p className="text-2xl font-bold">{5}</p>
+                <p className="text-xs text-muted-foreground">Active Venues</p>
               </div>
             </div>
           </CardContent>
@@ -1255,7 +1261,7 @@ const StaffDashboard = () => {
                   <div className="flex flex-col justify-center items-center p-8 text-muted-foreground">
                     <AlertCircle className="h-8 w-8 mb-2" />
                     <p className="font-medium">
-                      {searchTerm || filterStatus !== 'All'
+                      {searchTerm || filterStatus !== "All"
                         ? `No results found for current filters.`
                         : "No Player Records Found"}
                     </p>
@@ -1470,10 +1476,10 @@ const StaffDashboard = () => {
                         <p className="font-medium flex items-center gap-2">
                           {coach.coach_name}
                           <span className="text-sm font-normal text-gray-500">
-                            ({coach.phone_numbers}) • ({coach.week_salary}/session)
+                            ({coach.phone_numbers}) • ({coach.week_salary}
+                            /session)
                           </span>
                         </p>
-                       
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
