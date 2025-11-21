@@ -1,0 +1,79 @@
+name: Node.js CI/CD to VPS via SSH
+
+# 1. WHEN to run the workflow
+on:
+  push:
+    branches: [ "main" ] # Triggers on push to the main branch
+  pull_request:
+    branches: [ "main" ] # Triggers on pull requests to the main branch
+
+# 2. DEFINE JOBS
+jobs:
+  # --- CI Job: Build and Test ---
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js environment
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20' # Recommended latest stable version
+        cache: 'npm'       
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Run project build (if applicable)
+      # If your project has a build step (e.g., for front-end assets or compilation)
+      run: npm run build || echo "No build script found, continuing..."
+
+    - name: Run tests (Optional, but recommended)
+      run: npm test || echo "No test script found, continuing..."
+    
+    # 💡 IMPORTANT: Upload the ENTIRE repository content for deployment
+    - name: Upload artifact for deployment
+      uses: actions/upload-artifact@v4
+      with:
+        name: final-codebase
+        path: . # Uploads the entire project root directory after install/build
+        retention-days: 1
+
+  # --- CD Job: Deploy to Host (only runs after CI success) ---
+  deploy:
+    # This job ONLY runs if the 'build-and-test' job succeeded
+    needs: build-and-test 
+    # This job ONLY runs when code is pushed to the 'main' branch
+    if: github.ref == 'refs/heads/main' 
+    
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download final codebase artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: final-codebase
+        path: ./app-root # Downloads the code into a local folder for SSH
+
+    - name: Deploy to VPS via SSH and SCP
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        # These connection details MUST be stored in GitHub Secrets!
+        host: ${{ secrets.SSH_HOST }} 
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT }} # Typically 22
+
+        # Copy the downloaded codebase to the server
+        source: "app-root/"
+        target: "/var/www/academy-nexus-cms/" # Change this to your server path
+
+        # Commands to run on the server AFTER copying files
+        script: |
+          echo "Deployment complete. Restarting application..."
+          cd /var/www/academy-nexus-cms/
+          # 💡 Adjust this command based on your process manager (PM2, systemd, etc.)
+          pm2 restart academy-nexus-cms || pm2 start npm --name academy-nexus-cms -- start
+          echo "Server deployment finished."
